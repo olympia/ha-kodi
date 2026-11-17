@@ -1,0 +1,9 @@
+# The Home Assistant release the tests run against, with its test fixtures
+pytest-homeassistant==2026.11.2
+
+pykodi==0.3.0
+
+coverage==7.17.2
+mypy==2.4.1
+pytest-cov==7.1.0
+ruff==0.17.4

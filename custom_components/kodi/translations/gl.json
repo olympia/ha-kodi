@@ -1,0 +1,114 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "O dispositivo xa est\u00e1 configurado",
+            "cannot_connect": "Non se puido conectar",
+            "invalid_auth": "Autenticaci\u00f3n non v\u00e1lida",
+            "no_uuid": "A instancia de Kodi non ten un ID \u00fanico. O m\u00e1is probable \u00e9 que se deba a unha versi\u00f3n antiga de Kodi (17.x ou anterior). Podes configurar a integraci\u00f3n manualmente ou actualizar a unha versi\u00f3n m\u00e1is recente de Kodi.",
+            "unknown": "Erro inesperado"
+        },
+        "error": {
+            "cannot_connect": "Non se puido conectar",
+            "invalid_auth": "Autenticaci\u00f3n non v\u00e1lida",
+            "unknown": "Erro inesperado"
+        },
+        "flow_title": "{name}",
+        "step": {
+            "credentials": {
+                "data": {
+                    "password": "Contrasinal",
+                    "username": "Nome de usuario"
+                },
+                "description": "Introduce o teu nome de usuario e contrasinal de Kodi. P\u00f3dense atopar en Sistema/Configuraci\u00f3n/Rede/Servizos."
+            },
+            "discovery_confirm": {
+                "description": "Queres engadir Kodi (`{name}`) a Home Assistant?",
+                "title": "Descubriuse Kodi"
+            },
+            "reauth_confirm": {
+                "data": {
+                    "password": "Contrasinal",
+                    "username": "Nome de usuario"
+                },
+                "description": "As credenciais de Kodi en {host} xa non son v\u00e1lidas. Introduce o teu nome de usuario e contrasinal de Kodi. P\u00f3dense atopar en Sistema/Configuraci\u00f3n/Rede/Servizos.",
+                "title": "A autenticaci\u00f3n caducou para {name}"
+            },
+            "user": {
+                "data": {
+                    "host": "Host",
+                    "port": "Porto",
+                    "ssl": "Usa un certificado SSL"
+                },
+                "data_description": {
+                    "host": "O nome do host ou o enderezo IP do sistema que aloxa o teu servidor Kodi."
+                },
+                "description": "Informaci\u00f3n de conexi\u00f3n de Kodi. Aseg\u00farate de activar \"Permitir o control de Kodi mediante HTTP\" en Sistema/Configuraci\u00f3n/Rede/Servizos."
+            },
+            "ws_port": {
+                "data": {
+                    "ws_port": "Porto"
+                },
+                "description": "Porto WebSocket (\u00e1s veces chamado porto TCP en Kodi). Para conectar por WebSocket, tes que activar \"Permitir que os programas ... controlen Kodi\" en Sistema/Configuraci\u00f3n/Rede/Servizos. Se WebSocket non est\u00e1 activado, quita o porto e d\u00e9ixao baleiro."
+            }
+        }
+    },
+    "device_automation": {
+        "trigger_type": {
+            "turn_off": "{entity_name} apagouse",
+            "turn_on": "{entity_name} acendeuse"
+        }
+    },
+    "entity": {
+        "media_player": {
+            "media_player": {
+                "state_attributes": {
+                    "dynamic_range": {
+                        "name": "Rango din\u00e1mico"
+                    }
+                }
+            }
+        }
+    },
+    "exceptions": {
+        "login_failed": {
+            "message": "Fallou o inicio de sesi\u00f3n en {host}"
+        },
+        "notify_failed": {
+            "message": "Non \u00e9 posible enviar a notificaci\u00f3n a Kodi. Est\u00e1 Kodi en li\u00f1a?"
+        }
+    },
+    "services": {
+        "add_to_playlist": {
+            "description": "Engade m\u00fasica \u00e1 lista de reproduci\u00f3n predeterminada (\u00e9 dicir, playlistid=0).",
+            "fields": {
+                "artist_name": {
+                    "description": "Nome do artista opcional para filtrar o contido multimedia.",
+                    "name": "Nome do artista"
+                },
+                "media_id": {
+                    "description": "ID \u00fanico da entrada multimedia que engadir (`songid` ou albumid`). Se non se define, neces\u00edtanse o nome do contido e o nome do artista para buscar na biblioteca de m\u00fasica de Kodi.",
+                    "name": "ID multimedia"
+                },
+                "media_name": {
+                    "description": "Nome do contido opcional para filtrar o contido multimedia. Pode ser \u00abALL\u00bb cando o tipo de contido \u00e9 \u00abALBUM\u00bb e se indica o nome do artista, para engadir todas as canci\u00f3ns dun artista.",
+                    "name": "Nome do contido multimedia"
+                },
+                "media_type": {
+                    "description": "Identificador do tipo de contido. Debe ser \u00abSONG\u00bb ou \u00abALBUM\u00bb.",
+                    "name": "Tipo de contido multimedia"
+                }
+            },
+            "name": "Engadir \u00e1 lista de reproduci\u00f3n"
+        },
+        "call_method": {
+            "description": "Chama a un m\u00e9todo da API JSONRPC de Kodi con par\u00e1metros opcionais. Os resultados da chamada \u00e1 API de Kodi redirixiranse nun evento de Home Assistant: `kodi_call_method_result`.",
+            "fields": {
+                "method": {
+                    "description": "Nome do m\u00e9todo da API JSONRPC de Kodi que chamar.",
+                    "name": "M\u00e9todo"
+                }
+            },
+            "name": "Chamar m\u00e9todo"
+        }
+    }
+}

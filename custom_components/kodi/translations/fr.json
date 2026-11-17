@@ -1,0 +1,98 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "L'appareil est d\u00e9j\u00e0 configur\u00e9",
+            "cannot_connect": "\u00c9chec de la connexion",
+            "invalid_auth": "Authentification non valide",
+            "no_uuid": "L'instance Kodi n'a pas d'identifiant unique. Cela est probablement d\u00fb \u00e0 une ancienne version de Kodi (17.x ou inf\u00e9rieure). Vous pouvez configurer l'int\u00e9gration manuellement ou passer \u00e0 une version plus r\u00e9cente de Kodi.",
+            "unknown": "Erreur inattendue"
+        },
+        "error": {
+            "cannot_connect": "\u00c9chec de la connexion",
+            "invalid_auth": "Authentification non valide",
+            "unknown": "Erreur inattendue"
+        },
+        "flow_title": "{name}",
+        "step": {
+            "credentials": {
+                "data": {
+                    "password": "Mot de passe",
+                    "username": "Nom d'utilisateur"
+                },
+                "description": "Veuillez entrer votre nom d'utilisateur et votre mot de passe Kodi. Ceux-ci peuvent \u00eatre trouv\u00e9s dans Syst\u00e8me / Param\u00e8tres / R\u00e9seau / Services."
+            },
+            "discovery_confirm": {
+                "description": "Voulez-vous ajouter Kodi (`{name}`) \u00e0 Home Assistant\u00a0?",
+                "title": "Kodi d\u00e9couvert"
+            },
+            "user": {
+                "data": {
+                    "host": "H\u00f4te",
+                    "port": "Port",
+                    "ssl": "Utilise un certificat SSL"
+                },
+                "data_description": {
+                    "host": "Le nom d'h\u00f4te ou l'adresse IP du syst\u00e8me h\u00e9bergeant votre serveur Kodi."
+                },
+                "description": "Informations de connexion Kodi. Veuillez vous assurer d'activer \u00ab\u00a0Autoriser le contr\u00f4le de Kodi via HTTP\u00a0\u00bb dans Syst\u00e8me / Param\u00e8tres / R\u00e9seau / Services."
+            },
+            "ws_port": {
+                "data": {
+                    "ws_port": "Port"
+                },
+                "description": "Le port WebSocket (parfois appel\u00e9 port TCP dans Kodi). Pour vous connecter via WebSocket, vous devez activer \u00ab\u00a0Autoriser les programmes ... \u00e0 contr\u00f4ler Kodi\u00a0\u00bb dans Syst\u00e8me / Param\u00e8tres / R\u00e9seau / Services. Si WebSocket n'est pas activ\u00e9, supprimez le port et laissez vide."
+            }
+        }
+    },
+    "device_automation": {
+        "trigger_type": {
+            "turn_off": "{entity_name} a \u00e9t\u00e9 d\u00e9sactiv\u00e9",
+            "turn_on": "{entity_name} a \u00e9t\u00e9 activ\u00e9"
+        }
+    },
+    "entity": {
+        "media_player": {
+            "media_player": {
+                "state_attributes": {
+                    "dynamic_range": {
+                        "name": "Plage dynamique"
+                    }
+                }
+            }
+        }
+    },
+    "services": {
+        "add_to_playlist": {
+            "description": "Ajoute de la musique \u00e0 la playlist par d\u00e9faut (c'est-\u00e0-dire playlistid=0).",
+            "fields": {
+                "artist_name": {
+                    "description": "Nom d'artiste facultatif pour filtrer les m\u00e9dias.",
+                    "name": "Nom de l'artiste"
+                },
+                "media_id": {
+                    "description": "Identifiant unique de l'entr\u00e9e de m\u00e9dia \u00e0 ajouter (`songid` ou `albumid`). S'il n'est pas d\u00e9fini, le nom du m\u00e9dia et le nom de l'artiste sont n\u00e9cessaires pour effectuer une recherche dans la biblioth\u00e8que musicale de Kodi.",
+                    "name": "ID du m\u00e9dia"
+                },
+                "media_name": {
+                    "description": "Nom de m\u00e9dia facultatif pour filtrer les m\u00e9dias. Peut \u00eatre \u00ab\u00a0ALL\u00a0\u00bb lorsque le type de m\u00e9dia est \u00ab\u00a0ALBUM\u00a0\u00bb et que le nom de l'artiste est sp\u00e9cifi\u00e9, afin d'ajouter toutes les chansons d'un m\u00eame artiste.",
+                    "name": "Nom du m\u00e9dia"
+                },
+                "media_type": {
+                    "description": "Identificateur de type de m\u00e9dia. Il doit s'agir de \u00ab\u00a0SONG\u00a0\u00bb ou de \u00ab\u00a0ALBUM\u00a0\u00bb.",
+                    "name": "Type de m\u00e9dia"
+                }
+            },
+            "name": "Ajouter \u00e0 la playlist"
+        },
+        "call_method": {
+            "description": "Appelle une m\u00e9thode de l'API JSONRPC de Kodi avec des param\u00e8tres facultatifs. Les r\u00e9sultats de l'appel \u00e0 l'API Kodi seront redirig\u00e9s dans un \u00e9v\u00e9nement Home Assistant\u00a0: `kodi_call_method_result`.",
+            "fields": {
+                "method": {
+                    "description": "Nom de la m\u00e9thode de l'API JSONRPC de Kodi \u00e0 appeler.",
+                    "name": "M\u00e9thode"
+                }
+            },
+            "name": "Appeler la m\u00e9thode"
+        }
+    }
+}

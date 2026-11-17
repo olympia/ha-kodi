@@ -1,0 +1,17 @@
+Kodi custom integration for Home Assistant
+https://github.com/olympia/ha-kodi
+
+This product includes software developed by The Home Assistant Authors
+(https://github.com/home-assistant/core), licensed under the Apache License,
+Version 2.0.
+
+The integration in custom_components/kodi and its tests in tests/components/kodi
+started as a copy of the Kodi integration of Home Assistant Core, dev branch at
+commit 2fdf7b57d3e1a4261239c5c0ce33b51893b6c4c1, with the changes of
+home-assistant/core#192353 and of the connection handling prepared for Home
+Assistant Core applied. The git history of this repository records every change
+since, and README.md lists where the code differs from the code in core.
+
+The settings in pyproject.toml and tests/ruff.toml are taken from Home Assistant
+Core. The brand images in custom_components/kodi/brand come from the Home
+Assistant brands repository (https://github.com/home-assistant/brands).

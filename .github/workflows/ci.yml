@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  PYTHON_VERSION: "3.14"
+  # The dev branch of home-assistant/core the core checks run against
+  CORE_REF: a3e979290d3f558af8a4cdf7f71bdebb2bd32d57
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          activate-environment: true
+      - name: Install the requirements
+        run: uv pip install -r requirements_test.txt
+      - name: Run ruff check
+        run: ruff check --output-format=github .
+      - name: Run ruff format
+        run: ruff format --check .
+      - name: Run mypy
+        run: mypy custom_components script
+      - name: Check the translations
+        run: python -m script.gen_translations --check
+
+  tests:
+    name: Tests (${{ matrix.home-assistant }} Home Assistant)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        home-assistant:
+          - pinned
+          - minimum
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          activate-environment: true
+      - name: Install the requirements
+        env:
+          HOME_ASSISTANT: ${{ matrix.home-assistant }}
+        run: |
+          if [ "${HOME_ASSISTANT}" = "minimum" ]; then
+            minimum="$(jq -r .homeassistant hacs.json)"
+            echo "pytest-homeassistant==${minimum}" > "${RUNNER_TEMP}/overrides.txt"
+            uv pip install -r requirements_test.txt --overrides "${RUNNER_TEMP}/overrides.txt"
+          else
+            uv pip install -r requirements_test.txt
+          fi
+      - name: Run pytest
+        run: pytest -p no:cacheprovider --cov --cov-report=json --cov-report=term
+      - name: Check the coverage of every module
+        if: matrix.home-assistant == 'pinned'
+        run: python -m script.check_coverage
+
+  core:
+    name: Core checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ha-kodi
+          persist-credentials: false
+      - name: Check out Home Assistant Core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: home-assistant/core
+          ref: ${{ env.CORE_REF }}
+          path: core
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          activate-environment: true
+          working-directory: core
+      - name: Install Home Assistant Core
+        working-directory: core
+        run: |
+          jq -r '.requirements[] | sub(">="; "==")' ../ha-kodi/custom_components/kodi/manifest.json > "${RUNNER_TEMP}/kodi.txt"
+          uv pip install -r requirements.txt -r requirements_test.txt -r "${RUNNER_TEMP}/kodi.txt"
+          uv pip install -e . -e packages/hassfest -e packages/pytest-homeassistant --config-settings editable_mode=compat
+      - name: Put the integration into core
+        working-directory: core
+        run: |
+          python ../ha-kodi/script/core_parity.py .
+          ruff check --fix --quiet tests/components/kodi
+          git status --short
+      - name: Run ruff
+        working-directory: core
+        run: |
+          ruff check homeassistant/components/kodi tests/components/kodi
+          ruff format --check homeassistant/components/kodi tests/components/kodi
+      - name: Run pylint
+        working-directory: core
+        run: |
+          pylint --ignore-missing-annotations=y homeassistant/components/kodi
+          pylint tests/components/kodi
+      - name: Run mypy
+        working-directory: core
+        run: mypy homeassistant/components/kodi
+      - name: Run hassfest
+        working-directory: core
+        run: python -m script.hassfest --action validate
+      - name: Run the tests in core
+        working-directory: core
+        run: |
+          python -m script.translations develop --all > /dev/null
+          pytest -p no:cacheprovider tests/components/kodi

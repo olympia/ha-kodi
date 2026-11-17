@@ -1,0 +1,58 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Gailua dagoeneko konfiguratuta dago",
+            "cannot_connect": "Konexioak huts egin du",
+            "invalid_auth": "Autentifikazio baliogabea",
+            "unknown": "Ustekabeko errorea"
+        },
+        "error": {
+            "cannot_connect": "Konexioak huts egin du",
+            "invalid_auth": "Autentifikazio baliogabea",
+            "unknown": "Ustekabeko errorea"
+        },
+        "flow_title": "{name}",
+        "step": {
+            "credentials": {
+                "data": {
+                    "password": "Pasahitza",
+                    "username": "Erabiltzaile-izena"
+                }
+            },
+            "reauth_confirm": {
+                "data": {
+                    "password": "Pasahitza",
+                    "username": "Erabiltzaile-izena"
+                },
+                "title": "{name}-entzako autortza iraungi da"
+            },
+            "user": {
+                "data": {
+                    "host": "Ostalari",
+                    "port": "Ataka",
+                    "ssl": "SSL ziurtagiria erabiltzen du"
+                }
+            },
+            "ws_port": {
+                "data": {
+                    "ws_port": "Ataka"
+                }
+            }
+        }
+    },
+    "device_automation": {
+        "trigger_type": {
+            "turn_off": "{entity_name} itzali da",
+            "turn_on": "{entity_name} piztu da"
+        }
+    },
+    "services": {
+        "call_method": {
+            "fields": {
+                "method": {
+                    "name": "Metodoa"
+                }
+            }
+        }
+    }
+}
