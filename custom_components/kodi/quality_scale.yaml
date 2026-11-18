@@ -52,9 +52,7 @@ rules:
   parallel-updates:
     status: todo
     comment: The media_player and notify platforms do not set PARALLEL_UPDATES.
-  reauthentication-flow:
-    status: todo
-    comment: The setup starts the reauthentication flow when the web server of Kodi rejects the credentials, but nothing notices credentials that stop working while the entry is loaded.
+  reauthentication-flow: done
   test-coverage:
     status: todo
     comment: The tests cover browse_media.py, media_player.py and notify.py for less than 95 percent.

@@ -1,7 +1,9 @@
 """Test the Kodi integration init."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, call, patch
 
 from freezegun.api import FrozenDateTimeFactory
@@ -11,7 +13,11 @@ import pytest
 from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.kodi.const import DOMAIN
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    ConfigEntryState,
+    ConfigFlowResult,
+)
 from homeassistant.const import (
     CONF_PASSWORD,
     CONF_SSL,
@@ -22,11 +28,13 @@ from homeassistant.const import (
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.setup import async_setup_component
 
 from . import init_integration, setup_integration
 from .util import MockConnection
 
 WATCHDOG_INTERVAL = timedelta(seconds=10)
+CREDENTIAL_CHECK_INTERVAL = timedelta(minutes=1)
 
 websocket = pytest.mark.parametrize(
     "can_subscribe", [pytest.param(True, id="websocket")]
@@ -419,3 +427,376 @@ async def test_http_connection_has_no_watchdog(
 
     mock_connection.subscribe.assert_not_called()
     mock_kodi.ping.assert_not_awaited()
+
+
+async def advance_time(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, interval: timedelta
+) -> None:
+    """Let the given time pass in steps of 10 s, waiting for the background tasks after each step."""
+    step = timedelta(seconds=10)
+    while interval > timedelta(0):
+        freezer.tick(min(step, interval))
+        interval -= step
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+
+def reauth_flows(hass: HomeAssistant, entry: MockConfigEntry) -> list[ConfigFlowResult]:
+    """Return the reauthentication flows of the entry."""
+    return list(entry.async_get_active_flows(hass, {SOURCE_REAUTH}))
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "return_value", "reauth"),
+    [
+        pytest.param(InvalidAuthError, None, True, id="rejected"),
+        pytest.param(CannotConnectError("Timeout"), None, False, id="cannot_connect"),
+        pytest.param(
+            ProtocolError(-32601, "Method not found"),
+            None,
+            False,
+            id="protocol_error",
+        ),
+        pytest.param(None, True, False, id="accepted"),
+    ],
+)
+@pytest.mark.usefixtures("mock_connection")
+async def test_failed_poll_checks_credentials(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    side_effect: type[Exception] | Exception | None,
+    return_value: bool | None,
+    reauth: bool,
+) -> None:
+    """Test a failed poll starts reauthentication only for rejected credentials."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("Timeout")
+    mock_http_kodi.ping.side_effect = side_effect
+    mock_http_kodi.ping.return_value = return_value
+
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL)
+
+    assert mock_http_kodi.ping.await_count == 2
+    assert bool(reauth_flows(hass, mock_config_entry)) is reauth
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_successful_poll_does_not_check_credentials(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test only a failed poll checks the credentials."""
+    await setup_integration(hass, mock_config_entry)
+
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL)
+
+    mock_kodi.get_players.assert_awaited()
+    assert mock_http_kodi.ping.await_count == 1
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_credential_check_at_most_once_a_minute(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test failed polls check the credentials once a minute after the setup."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("Timeout")
+    mock_http_kodi.ping.side_effect = CannotConnectError("Timeout")
+
+    await advance_time(hass, freezer, timedelta(seconds=50))
+    assert mock_http_kodi.ping.await_count == 1
+    await advance_time(hass, freezer, timedelta(seconds=10))
+    assert mock_http_kodi.ping.await_count == 2
+    await advance_time(hass, freezer, timedelta(seconds=50))
+    assert mock_http_kodi.ping.await_count == 2
+    await advance_time(hass, freezer, timedelta(seconds=10))
+    assert mock_http_kodi.ping.await_count == 3
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_credential_check_runs_once_at_a_time(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a failed poll does not start a check while one is pending."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("Timeout")
+    pinging = asyncio.Event()
+    release = asyncio.Event()
+
+    async def ping() -> bool:
+        pinging.set()
+        await release.wait()
+        return True
+
+    mock_http_kodi.ping.side_effect = ping
+    freezer.tick(CREDENTIAL_CHECK_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert pinging.is_set()
+
+    freezer.tick(CREDENTIAL_CHECK_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert mock_http_kodi.ping.await_count == 2
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_reauth_starts_again_after_abort(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test rejected credentials start one reauth flow at a time, also after an abort."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("HTTP 401")
+    mock_http_kodi.ping.side_effect = InvalidAuthError
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL)
+    flow = reauth_flows(hass, mock_config_entry)[0]
+
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL)
+    assert mock_http_kodi.ping.await_count == 3
+    assert reauth_flows(hass, mock_config_entry) == [flow]
+
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL)
+
+    assert mock_http_kodi.ping.await_count == 4
+    assert len(reauth_flows(hass, mock_config_entry)) == 1
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        pytest.param(
+            lambda hass, entry: hass.config_entries.async_unload(entry.entry_id),
+            id="unload",
+        ),
+        pytest.param(
+            lambda hass, entry: hass.config_entries.async_reload(entry.entry_id),
+            id="reload",
+        ),
+        pytest.param(lambda hass, entry: hass.async_stop(), id="stop"),
+    ],
+)
+@pytest.mark.usefixtures("mock_connection")
+async def test_pending_check_does_not_start_reauth_after_unload(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    stop: Callable[[HomeAssistant, MockConfigEntry], Awaitable[Any]],
+) -> None:
+    """Test a check of the old load that is still pending starts nothing."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("HTTP 401")
+    pinging = asyncio.Event()
+    release = asyncio.Event()
+
+    async def rejecting_ping() -> bool:
+        pinging.set()
+        await release.wait()
+        raise InvalidAuthError
+
+    async def accepting_ping() -> bool:
+        return True
+
+    # The setup after a reload pings again
+    pings = iter([rejecting_ping, accepting_ping])
+
+    async def ping() -> bool:
+        return await next(pings)()
+
+    mock_http_kodi.ping.side_effect = ping
+    freezer.tick(CREDENTIAL_CHECK_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert pinging.is_set()
+
+    await stop(hass, mock_config_entry)
+    await hass.async_block_till_done()
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not reauth_flows(hass, mock_config_entry)
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_check_finishing_during_unload_does_not_start_reauth(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a check that fails the login while the entry unloads starts nothing."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("HTTP 401")
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def ping() -> bool:
+        try:
+            await release.wait()
+            raise InvalidAuthError
+        finally:
+            finished.set()
+
+    mock_http_kodi.ping.side_effect = ping
+    freezer.tick(CREDENTIAL_CHECK_INTERVAL)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    unload_platforms = hass.config_entries.async_unload_platforms
+
+    async def unload_platforms_after_check(*args: Any) -> bool:
+        release.set()
+        await finished.wait()
+        return await unload_platforms(*args)
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        side_effect=unload_platforms_after_check,
+    ):
+        assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not reauth_flows(hass, mock_config_entry)
+
+
+@websocket
+@pytest.mark.usefixtures("mock_kodi", "mock_connection")
+async def test_watchdog_checks_credentials_once_a_minute(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test the watchdog notices credentials changed while the websocket is up."""
+    await setup_integration(hass, mock_config_entry)
+    mock_http_kodi.ping.side_effect = InvalidAuthError
+
+    await advance_time(hass, freezer, timedelta(seconds=50))
+    assert not reauth_flows(hass, mock_config_entry)
+    await advance_time(hass, freezer, timedelta(seconds=10))
+
+    assert len(reauth_flows(hass, mock_config_entry)) == 1
+
+
+@websocket
+@pytest.mark.parametrize(
+    ("version_failures", "pings_after_two_runs"),
+    [
+        pytest.param([], 1, id="connect"),
+        pytest.param(
+            [TransportError("Connection lost"), TransportError("Connection lost")],
+            0,
+            id="version_failed",
+        ),
+    ],
+)
+async def test_reconnect_starts_reauth(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    version_failures: list[Exception],
+    pings_after_two_runs: int,
+) -> None:
+    """Test the watchdog checks the credentials once it connected again."""
+
+    async def connect() -> None:
+        mock_connection.connected = True
+
+    properties = mock_kodi.get_application_properties.side_effect
+    failures = iter(version_failures)
+
+    def get_application_properties(requested: list[str]) -> dict[str, Any]:
+        for error in failures:
+            raise error
+        return properties(requested)
+
+    mock_connection.connected = False
+    mock_connection.connect.side_effect = CannotConnectError("Timeout")
+    await setup_integration(hass, mock_config_entry)
+    mock_connection.connect.side_effect = connect
+    mock_kodi.get_application_properties.side_effect = get_application_properties
+    mock_http_kodi.ping.side_effect = InvalidAuthError
+
+    await advance_time(hass, freezer, WATCHDOG_INTERVAL * 2)
+    assert mock_http_kodi.ping.await_count == pings_after_two_runs
+    await advance_time(hass, freezer, WATCHDOG_INTERVAL)
+
+    assert mock_connection.connected
+    assert len(reauth_flows(hass, mock_config_entry)) == 1
+
+
+@websocket
+@pytest.mark.usefixtures("mock_kodi")
+async def test_failed_reconnect_does_not_check_credentials(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test the watchdog leaves the credentials alone while Kodi is away."""
+    mock_connection.connected = False
+    mock_connection.connect.side_effect = CannotConnectError("Timeout")
+    await setup_integration(hass, mock_config_entry)
+
+    await advance_time(hass, freezer, CREDENTIAL_CHECK_INTERVAL * 2)
+
+    mock_http_kodi.ping.assert_not_awaited()
+
+
+@websocket
+@pytest.mark.usefixtures("mock_connection")
+async def test_failed_websocket_update_does_not_check_credentials(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    mock_http_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test only the watchdog checks the credentials of a websocket entry."""
+    # The watchdog does not run before Home Assistant has started, so only the update could check
+    hass.set_state(CoreState.not_running)
+    await async_setup_component(hass, "homeassistant", {})
+    await setup_integration(hass, mock_config_entry)
+    freezer.tick(CREDENTIAL_CHECK_INTERVAL)
+    mock_kodi.get_players.side_effect = TransportError("Connection lost")
+
+    await hass.services.async_call(
+        "homeassistant",
+        "update_entity",
+        {"entity_id": "media_player.name"},
+        blocking=True,
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    mock_kodi.get_players.assert_awaited()
+    assert mock_http_kodi.ping.await_count == 1

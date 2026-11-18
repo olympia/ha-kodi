@@ -8,10 +8,10 @@ import logging
 from typing import Any
 
 from jsonrpc_base.jsonrpc import ProtocolError, TransportError
-from pykodi import CannotConnectError, Kodi
+from pykodi import CannotConnectError, InvalidAuthError, Kodi
 from pykodi.kodi import KodiHTTPConnection, KodiWSConnection
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
@@ -19,6 +19,7 @@ from homeassistant.helpers.start import async_at_started
 _LOGGER = logging.getLogger(__name__)
 
 WEBSOCKET_WATCHDOG_INTERVAL = timedelta(seconds=10)
+CREDENTIAL_CHECK_INTERVAL = timedelta(minutes=1)
 
 SYSTEM_NOTIFICATIONS = ("System.OnQuit", "System.OnRestart", "System.OnSleep")
 
@@ -38,12 +39,14 @@ class KodiConnectionManager:
         entry: KodiConfigEntry,
         connection: KodiHTTPConnection | KodiWSConnection,
         kodi: Kodi,
+        http_kodi: Kodi,
     ) -> None:
         """Initialize the connection manager."""
         self.hass = hass
         self.entry = entry
         self.connection = connection
         self.kodi = kodi
+        self._http_kodi = http_kodi
         # The Kodi version read over WebSocket after the last connect. None
         # until then, and again after Kodi quits or a connect, ping or version
         # request fails.
@@ -52,6 +55,8 @@ class KodiConnectionManager:
         self._unsubscribe: list[Callable[[], None]] = []
         self._watchdog_task: asyncio.Task[None] | None = None
         self._connect_error = False
+        self._credential_check_task: asyncio.Task[None] | None = None
+        self._last_credential_check: float | None = None
 
     @callback
     def async_add_listener(self, listener: CALLBACK_TYPE) -> CALLBACK_TYPE:
@@ -74,6 +79,41 @@ class KodiConnectionManager:
         # Over WebSocket the watchdog connects later, and logs if that fails too
         with suppress(CannotConnectError, TransportError, ProtocolError):
             await self._async_connect()
+
+    async def async_credentials_rejected(self) -> bool:
+        """Return whether Kodi rejects the login, and restart the check interval."""
+        self._last_credential_check = self.hass.loop.time()
+        try:
+            await self._http_kodi.ping()
+        except InvalidAuthError:
+            return True
+        except CannotConnectError, ProtocolError:
+            # The credentials stay unchecked, as for a Kodi that is off
+            pass
+        return False
+
+    @callback
+    def async_check_credentials(self) -> None:
+        """Check the credentials in the background, at most once a minute."""
+        if (
+            self._credential_check_task is not None
+            and not self._credential_check_task.done()
+        ) or (
+            self._last_credential_check is not None
+            and self.hass.loop.time() - self._last_credential_check
+            < CREDENTIAL_CHECK_INTERVAL.total_seconds()
+        ):
+            return
+        self._credential_check_task = self.entry.async_create_background_task(
+            self.hass, self._async_check_credentials(), "kodi credential check"
+        )
+
+    async def _async_check_credentials(self) -> None:
+        if (
+            await self.async_credentials_rejected()
+            and self.entry.state is ConfigEntryState.LOADED
+        ):
+            self.entry.async_start_reauth(self.hass)
 
     @callback
     def async_start(self) -> None:
@@ -133,6 +173,8 @@ class KodiConnectionManager:
                 await self.connection.close()
                 return
         self._connect_error = False
+        # Kodi does not check credentials over WebSocket
+        self.async_check_credentials()
 
     async def _async_connect(self) -> None:
         await self.connection.connect()

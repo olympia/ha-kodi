@@ -285,6 +285,7 @@ class KodiEntity(MediaPlayerEntity):
             players = await self._kodi.get_players()
         except TransportError, ProtocolError:
             if not self._connection.can_subscribe:
+                self._manager.async_check_credentials()
                 self._reset_state()
                 return
             raise

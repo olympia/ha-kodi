@@ -1,7 +1,6 @@
 """The Kodi integration."""
 
-from jsonrpc_base.jsonrpc import ProtocolError
-from pykodi import CannotConnectError, InvalidAuthError, Kodi, get_kodi_connection
+from pykodi import Kodi, get_kodi_connection
 
 from homeassistant.const import (
     CONF_HOST,
@@ -44,7 +43,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None
         session=async_get_clientsession(hass),
     )
 
-    manager = KodiConnectionManager(hass, entry, conn, Kodi(conn))
+    http_conn = get_kodi_connection(
+        entry.data[CONF_HOST],
+        entry.data[CONF_PORT],
+        None,
+        entry.data[CONF_USERNAME],
+        entry.data[CONF_PASSWORD],
+        entry.data[CONF_SSL],
+        session=async_get_clientsession(hass),
+    )
+
+    manager = KodiConnectionManager(hass, entry, conn, Kodi(conn), Kodi(http_conn))
     # Unload callbacks run in reverse order, so this one closes the connection
     # after the manager removed the timer of its watchdog. It also runs when
     # the setup fails or is cancelled.
@@ -60,38 +69,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None
     await manager.async_setup()
     # Only a WebSocket connection is down here, when Kodi did not answer, and
     # a ping would then only add another timeout
-    if conn.connected:
-        await _async_check_credentials(hass, entry)
+    if conn.connected and await manager.async_credentials_rejected():
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="login_failed",
+            translation_placeholders={"host": entry.data[CONF_HOST]},
+        )
 
     entry.runtime_data = manager
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     manager.async_start()
-
-
-async def _async_check_credentials(hass: HomeAssistant, entry: KodiConfigEntry) -> None:
-    """Ping Kodi over HTTP, only its web server checks the credentials."""
-    connection = get_kodi_connection(
-        entry.data[CONF_HOST],
-        entry.data[CONF_PORT],
-        None,
-        entry.data[CONF_USERNAME],
-        entry.data[CONF_PASSWORD],
-        entry.data[CONF_SSL],
-        session=async_get_clientsession(hass),
-    )
-    try:
-        await Kodi(connection).ping()
-    except InvalidAuthError as error:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN,
-            translation_key="login_failed",
-            translation_placeholders={"host": entry.data[CONF_HOST]},
-        ) from error
-    except CannotConnectError, ProtocolError:
-        # The credentials stay unchecked, as for a Kodi that is off
-        pass
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None:
