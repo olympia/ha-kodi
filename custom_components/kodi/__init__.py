@@ -1,6 +1,7 @@
 """The Kodi integration."""
 
-from pykodi import InvalidAuthError, Kodi, get_kodi_connection
+from jsonrpc_base.jsonrpc import ProtocolError
+from pykodi import CannotConnectError, InvalidAuthError, Kodi, get_kodi_connection
 
 from homeassistant.const import (
     CONF_HOST,
@@ -56,20 +57,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None
         hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, manager.async_stop)
     )
 
-    try:
-        await manager.async_setup()
-    except InvalidAuthError as error:
-        raise ConfigEntryAuthFailed(
-            translation_domain=DOMAIN,
-            translation_key="login_failed",
-            translation_placeholders={"host": entry.data[CONF_HOST]},
-        ) from error
+    await manager.async_setup()
+    # Only a WebSocket connection is down here, when Kodi did not answer, and
+    # a ping would then only add another timeout
+    if conn.connected:
+        await _async_check_credentials(hass, entry)
 
     entry.runtime_data = manager
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     manager.async_start()
+
+
+async def _async_check_credentials(hass: HomeAssistant, entry: KodiConfigEntry) -> None:
+    """Ping Kodi over HTTP, only its web server checks the credentials."""
+    connection = get_kodi_connection(
+        entry.data[CONF_HOST],
+        entry.data[CONF_PORT],
+        None,
+        entry.data[CONF_USERNAME],
+        entry.data[CONF_PASSWORD],
+        entry.data[CONF_SSL],
+        session=async_get_clientsession(hass),
+    )
+    try:
+        await Kodi(connection).ping()
+    except InvalidAuthError as error:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="login_failed",
+            translation_placeholders={"host": entry.data[CONF_HOST]},
+        ) from error
+    except CannotConnectError, ProtocolError:
+        # The credentials stay unchecked, as for a Kodi that is off
+        pass
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None:

@@ -28,9 +28,7 @@ rules:
   has-entity-name: done
   runtime-data: done
   test-before-configure: done
-  test-before-setup:
-    status: todo
-    comment: Setup does not check the credentials, over HTTP connect() sends no request and the WebSocket server of Kodi does not check credentials.
+  test-before-setup: done
   unique-config-entry:
     status: todo
     comment: The user flow sets no unique ID and does not check the host, so any Kodi can be added again by hand, and one added by hand is offered again by discovery.
@@ -56,7 +54,7 @@ rules:
     comment: The media_player and notify platforms do not set PARALLEL_UPDATES.
   reauthentication-flow:
     status: todo
-    comment: The reauthentication flow exists, but nothing starts it, because connect() of pykodi never raises InvalidAuthError.
+    comment: The setup starts the reauthentication flow when the web server of Kodi rejects the credentials, but nothing notices credentials that stop working while the entry is loaded.
   test-coverage:
     status: todo
     comment: The tests cover browse_media.py, media_player.py and notify.py for less than 95 percent.

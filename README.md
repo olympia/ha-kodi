@@ -6,10 +6,11 @@ It uses the domain `kodi`, so your config entries, entities, device triggers, th
 
 ## What is different from the built-in integration
 
-Version 0.1.0 is the Kodi integration of the Home Assistant Core dev branch with:
+It is the Kodi integration of the Home Assistant Core dev branch with:
 
 - a fix for a refresh that went on after Kodi stopped playing or quit ([home-assistant/core#192353](https://github.com/home-assistant/core/pull/192353))
 - the connection to Kodi owned by the config entry instead of the media player, which closes the connection on unload and on stop, and no longer reconnects an entry that was unloaded during startup
+- a check of the username and password at setup: when Kodi is reachable and its web server rejects them, the setup fails and Home Assistant asks for new credentials
 
 The [roadmap](#roadmap) lists what comes next.
 
@@ -47,7 +48,6 @@ After the restart the built-in Kodi integration loads the same config entries.
 
 Each item is a separate change, in the order of the planned core pull requests:
 
-- credential check at setup, so a wrong password starts the reauthentication
 - duplicate check in the config flow, and discovery updating entries added by hand
 - descriptions for every field of the config flow
 - validation of the `kodi.add_to_playlist` action

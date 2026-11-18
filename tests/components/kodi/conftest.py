@@ -4,9 +4,10 @@ import asyncio
 from collections.abc import Awaitable, Callable, Generator
 import inspect
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, create_autospec, patch
 
 from jsonrpc_base.jsonrpc import TransportError
+from pykodi import Kodi
 from pykodi.kodi import KodiHTTPConnection, KodiWSConnection
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
@@ -65,7 +66,15 @@ def can_subscribe() -> bool:
 
 
 @pytest.fixture
-def mock_connection(can_subscribe: bool) -> Generator[MagicMock]:
+def mock_http_connection() -> MagicMock:
+    """Return the HTTP connection the setup checks the credentials over."""
+    return MagicMock(spec=KodiHTTPConnection)
+
+
+@pytest.fixture
+def mock_connection(
+    can_subscribe: bool, mock_http_connection: MagicMock
+) -> Generator[MagicMock]:
     """Return a connected Kodi connection."""
     connection = MagicMock(
         spec=KodiWSConnection if can_subscribe else KodiHTTPConnection
@@ -115,15 +124,33 @@ def mock_connection(can_subscribe: bool) -> Generator[MagicMock]:
         connection.connected = False
 
     connection.close.side_effect = close
+
+    def get_kodi_connection(
+        host: str, port: int, ws_port: int | None, *args: Any, **kwargs: Any
+    ) -> MagicMock:
+        return connection if ws_port is not None else mock_http_connection
+
     with patch(
         "custom_components.kodi.get_kodi_connection",
-        return_value=connection,
+        side_effect=get_kodi_connection,
     ):
         yield connection
 
 
 @pytest.fixture
-def mock_kodi(mock_connection: MagicMock) -> Generator[MagicMock]:
+def mock_http_kodi() -> MagicMock:
+    """Return the Kodi client of the credential check, which accepts them."""
+    kodi = create_autospec(Kodi, instance=True)
+    kodi.ping.return_value = True
+    return kodi
+
+
+@pytest.fixture
+def mock_kodi(
+    mock_connection: MagicMock,
+    mock_http_connection: MagicMock,
+    mock_http_kodi: MagicMock,
+) -> Generator[MagicMock]:
     """Return a Kodi client without active players."""
 
     def get_application_properties(properties: list[str]) -> dict[str, Any]:
@@ -133,6 +160,9 @@ def mock_kodi(mock_connection: MagicMock) -> Generator[MagicMock]:
 
     with patch("custom_components.kodi.Kodi", autospec=True) as kodi_class:
         kodi = kodi_class.return_value
+        kodi_class.side_effect = lambda connection: (
+            mock_http_kodi if connection is mock_http_connection else kodi
+        )
         kodi.get_application_properties.side_effect = get_application_properties
         kodi.get_players.return_value = []
         kodi.thumbnail_url.return_value = "http://1.1.1.1:8080/image/thumbnail"
