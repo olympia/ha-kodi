@@ -6,9 +6,7 @@ rules:
   appropriate-polling: done
   brands: done
   common-modules: done
-  config-flow-test-coverage:
-    status: todo
-    comment: The user flow sets no unique ID, so its tests do not check one, and no test checks that the user flow rejects a Kodi that is already configured.
+  config-flow-test-coverage: done
   config-flow:
     status: todo
     comment: Only the host field has a data_description, and the notify platform can only be set up in YAML.
@@ -29,9 +27,7 @@ rules:
   runtime-data: done
   test-before-configure: done
   test-before-setup: done
-  unique-config-entry:
-    status: todo
-    comment: The user flow sets no unique ID and does not check the host, so any Kodi can be added again by hand, and one added by hand is offered again by discovery.
+  unique-config-entry: done
 
   # Silver
   action-exceptions:

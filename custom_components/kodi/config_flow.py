@@ -128,6 +128,9 @@ class KodiConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_NAME: self._name,
             }
         )
+        # An entry added by hand has no UUID, so only its address can match
+        if self._async_entry_added_by_hand_at_address():
+            return self.async_abort(reason="already_configured")
 
         self.context.update({"title_placeholders": {"name": self._name}})
 
@@ -167,6 +170,9 @@ class KodiConfigFlow(ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
+            self._async_abort_entries_match(
+                {CONF_HOST: user_input[CONF_HOST], CONF_PORT: user_input[CONF_PORT]}
+            )
             self._host = user_input[CONF_HOST]
             self._port = user_input[CONF_PORT]
             self._ssl = user_input[CONF_SSL]
@@ -338,7 +344,24 @@ class KodiConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     @callback
+    def _async_entry_added_by_hand_at_address(self) -> bool:
+        """Return whether an entry without UUID has the host and port of this flow."""
+        return any(
+            entry.unique_id is None
+            and entry.data[CONF_HOST] == self._host
+            and entry.data[CONF_PORT] == self._port
+            for entry in self._async_current_entries(include_ignore=False)
+        )
+
+    @callback
     def _create_entry(self):
+        # Another flow can add this Kodi while this one waits for the user
+        if self.unique_id is None:
+            self._async_abort_entries_match(
+                {CONF_HOST: self._host, CONF_PORT: self._port}
+            )
+        elif self._async_entry_added_by_hand_at_address():
+            return self.async_abort(reason="already_configured")
         return self.async_create_entry(
             title=self._name or self._host,
             data=self._get_data(),

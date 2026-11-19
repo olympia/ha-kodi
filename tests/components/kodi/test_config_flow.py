@@ -87,9 +87,9 @@ async def test_user_flow(hass: HomeAssistant, user_flow: str) -> None:
         result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
         await hass.async_block_till_done()
 
-    # pylint: disable-next=home-assistant-tests-config-flow-unique-id
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == TEST_HOST["host"]
+    assert result["result"].unique_id is None
     assert result["data"] == {
         **TEST_HOST,
         **TEST_WS_PORT,
@@ -140,6 +140,7 @@ async def test_form_valid_auth(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
     assert result["title"] == TEST_HOST["host"]
     assert result["data"] == {
         **TEST_HOST,
@@ -195,6 +196,7 @@ async def test_form_valid_ws_port(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
     assert result["title"] == TEST_HOST["host"]
     assert result["data"] == {
         **TEST_HOST,
@@ -241,6 +243,7 @@ async def test_form_empty_ws_port(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
     assert result["title"] == TEST_HOST["host"]
     assert result["data"] == {
         **TEST_HOST,
@@ -356,6 +359,7 @@ async def test_form_invalid_auth(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
 
 
 async def test_form_cannot_connect_http(hass: HomeAssistant, user_flow: str) -> None:
@@ -383,6 +387,7 @@ async def test_form_cannot_connect_http(hass: HomeAssistant, user_flow: str) -> 
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
 
 
 async def test_form_exception_http(hass: HomeAssistant, user_flow: str) -> None:
@@ -410,6 +415,7 @@ async def test_form_exception_http(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
 
 
 async def test_form_cannot_connect_ws(hass: HomeAssistant, user_flow: str) -> None:
@@ -481,6 +487,7 @@ async def test_form_cannot_connect_ws(hass: HomeAssistant, user_flow: str) -> No
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
 
 
 async def test_form_exception_ws(hass: HomeAssistant, user_flow: str) -> None:
@@ -532,6 +539,7 @@ async def test_form_exception_ws(hass: HomeAssistant, user_flow: str) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
 
 
 async def test_discovery(hass: HomeAssistant) -> None:
@@ -628,6 +636,16 @@ async def test_discovery_cannot_connect_ws(hass: HomeAssistant) -> None:
     assert result["step_id"] == "ws_port"
     assert result["errors"] == {}
 
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_WS_PORT: 0}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_WS_PORT] is None
+    assert result["result"].unique_id == UUID
+
 
 async def test_discovery_exception_http(hass: HomeAssistant) -> None:
     """Test we handle generic exception during discovery validation."""
@@ -672,6 +690,16 @@ async def test_discovery_invalid_auth(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "credentials"
     assert result["errors"] == {}
+
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], TEST_CREDENTIALS
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_USERNAME] == TEST_CREDENTIALS["username"]
+    assert result["result"].unique_id == UUID
 
 
 async def test_discovery_duplicate_data(hass: HomeAssistant) -> None:
@@ -723,6 +751,317 @@ async def test_discovery_updates_unique_id(hass: HomeAssistant) -> None:
     assert entry.data["host"] == "1.1.1.1"
     assert entry.data["port"] == 8080
     assert entry.data["name"] == "hostname"
+
+
+def _entry_at_address(
+    host: str = "1.1.1.1",
+    port: int = 8080,
+    unique_id: str | None = None,
+    disabled_by: config_entries.ConfigEntryDisabler | None = None,
+) -> MockConfigEntry:
+    """Return an entry for the Kodi at the given address."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=unique_id,
+        disabled_by=disabled_by,
+        data={
+            **TEST_HOST,
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_SSL: True,
+            **TEST_WS_PORT,
+            **TEST_CREDENTIALS,
+            CONF_NAME: "Living room",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "unique_id",
+    [pytest.param(None, id="added_by_hand"), pytest.param(UUID, id="discovered")],
+)
+async def test_user_flow_already_configured(
+    hass: HomeAssistant, user_flow: str, unique_id: str | None
+) -> None:
+    """Test the user flow aborts for a configured address without connecting."""
+    _entry_at_address(port=8081).add_to_hass(hass)
+    _entry_at_address(unique_id=unique_id).add_to_hass(hass)
+
+    with patch(
+        "custom_components.kodi.config_flow.get_kodi_connection"
+    ) as mock_get_connection:
+        result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    mock_get_connection.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("host", "port"),
+    [
+        pytest.param("1.1.1.1", 8081, id="other_port"),
+        pytest.param("2.2.2.2", 8080, id="other_host"),
+    ],
+)
+async def test_user_flow_other_address(
+    hass: HomeAssistant, user_flow: str, host: str, port: int
+) -> None:
+    """Test the user flow adds a Kodi at an address that is not configured."""
+    _entry_at_address(host=host, port=port).add_to_hass(hass)
+
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_PORT] == 8080
+    assert result["result"].unique_id is None
+
+
+@pytest.mark.parametrize(
+    "unique_id",
+    [pytest.param(None, id="added_by_hand"), pytest.param(UUID, id="discovered")],
+)
+async def test_user_flow_address_configured_meanwhile(
+    hass: HomeAssistant, user_flow: str, unique_id: str | None
+) -> None:
+    """Test the user flow aborts if the address got configured while it waited."""
+    with (
+        patch(
+            "custom_components.kodi.config_flow.Kodi.ping",
+            side_effect=InvalidAuthError,
+        ),
+        patch(
+            "custom_components.kodi.config_flow.get_kodi_connection",
+            return_value=MockConnection(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
+    assert result["step_id"] == "credentials"
+
+    _entry_at_address(unique_id=unique_id).add_to_hass(hass)
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], TEST_CREDENTIALS
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+@contextmanager
+def _patch_ws_unreachable() -> Generator[None]:
+    """Let the HTTP check pass and the WebSocket check fail."""
+    with (
+        patch(
+            "custom_components.kodi.config_flow.Kodi.ping",
+            return_value=True,
+        ),
+        patch.object(
+            MockWSConnection,
+            "connect",
+            AsyncMock(side_effect=CannotConnectError),
+        ),
+        patch(
+            "custom_components.kodi.config_flow.get_kodi_connection",
+            new=get_kodi_connection,
+        ),
+    ):
+        yield
+
+
+@pytest.mark.parametrize(
+    "unique_id",
+    [pytest.param(None, id="added_by_hand"), pytest.param(UUID, id="discovered")],
+)
+async def test_user_flow_at_ws_port_address_configured_meanwhile(
+    hass: HomeAssistant, user_flow: str, unique_id: str | None
+) -> None:
+    """Test the user flow at the WebSocket port aborts for an address added meanwhile."""
+    with _patch_ws_unreachable():
+        result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
+    assert result["step_id"] == "ws_port"
+
+    _entry_at_address(unique_id=unique_id).add_to_hass(hass)
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_WS_PORT: 0}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_discovery_at_ws_port_entry_added_meanwhile(
+    hass: HomeAssistant,
+) -> None:
+    """Test discovery at the WebSocket port aborts for a Kodi added by hand meanwhile."""
+    with _patch_ws_unreachable():
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_ZEROCONF},
+            data=TEST_DISCOVERY,
+        )
+    assert result["step_id"] == "ws_port"
+
+    entry = _entry_at_address()
+    entry.add_to_hass(hass)
+    with _patch_kodi_success():
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_WS_PORT: 0}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+
+
+@pytest.mark.parametrize(
+    "disabled_by",
+    [
+        pytest.param(None, id="enabled"),
+        pytest.param(config_entries.ConfigEntryDisabler.USER, id="disabled"),
+    ],
+)
+async def test_discovery_aborts_for_entry_added_by_hand(
+    hass: HomeAssistant, disabled_by: config_entries.ConfigEntryDisabler | None
+) -> None:
+    """Test discovery leaves an entry added by hand at its address alone."""
+    _entry_at_address(host="2.2.2.2").add_to_hass(hass)
+    entry = _entry_at_address(disabled_by=disabled_by)
+    entry.add_to_hass(hass)
+    data = dict(entry.data)
+
+    with patch(
+        "custom_components.kodi.config_flow.get_kodi_connection"
+    ) as mock_get_connection:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_ZEROCONF},
+            data=TEST_DISCOVERY,
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.unique_id is None
+    assert entry.data == data
+    mock_get_connection.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("host", "port", "unique_id"),
+    [
+        pytest.param("1.1.1.1", 8081, None, id="other_port"),
+        pytest.param("2.2.2.2", 8080, None, id="other_host"),
+        pytest.param(
+            "1.1.1.1", 8080, "22222222-2222-2222-2222-222222222222", id="other_kodi"
+        ),
+    ],
+)
+async def test_discovery_next_to_other_entry(
+    hass: HomeAssistant, host: str, port: int, unique_id: str | None
+) -> None:
+    """Test discovery goes on next to an entry of another address or another Kodi."""
+    entry = _entry_at_address(host=host, port=port, unique_id=unique_id)
+    entry.add_to_hass(hass)
+    data = dict(entry.data)
+
+    with (
+        patch(
+            "custom_components.kodi.config_flow.Kodi.ping",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.kodi.config_flow.get_kodi_connection",
+            return_value=MockConnection(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_ZEROCONF},
+            data=TEST_DISCOVERY,
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "discovery_confirm"
+    assert entry.unique_id == unique_id
+
+    with patch("custom_components.kodi.async_setup_entry", return_value=None):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input={}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == UUID
+    assert entry.unique_id == unique_id
+    assert entry.data == data
+
+
+async def test_discovery_confirm_after_entry_added_meanwhile(
+    hass: HomeAssistant,
+) -> None:
+    """Test confirming a discovery aborts if the Kodi was added by hand meanwhile."""
+    with (
+        patch(
+            "custom_components.kodi.config_flow.Kodi.ping",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.kodi.config_flow.get_kodi_connection",
+            return_value=MockConnection(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_ZEROCONF},
+            data=TEST_DISCOVERY,
+        )
+    assert result["step_id"] == "discovery_confirm"
+
+    entry = _entry_at_address()
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.unique_id is None
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+
+
+async def test_discovery_next_to_ignored_kodi(hass: HomeAssistant) -> None:
+    """Test discovery goes on next to an ignored discovery of another Kodi."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_IGNORE},
+        data={"unique_id": "22222222-2222-2222-2222-222222222222", "title": "Other"},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "22222222-2222-2222-2222-222222222222"
+
+    with (
+        patch(
+            "custom_components.kodi.config_flow.Kodi.ping",
+            return_value=True,
+        ),
+        patch(
+            "custom_components.kodi.config_flow.get_kodi_connection",
+            return_value=MockConnection(),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_ZEROCONF},
+            data=TEST_DISCOVERY,
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "discovery_confirm"
 
 
 async def test_discovery_without_unique_id(hass: HomeAssistant) -> None:
@@ -874,8 +1213,8 @@ async def test_ws_probe_closed_after_success(
         result = await hass.config_entries.flow.async_configure(user_flow, TEST_HOST)
         await hass.async_block_till_done()
 
-    # pylint: disable-next=home-assistant-tests-config-flow-unique-id
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id is None
     probe.close.assert_awaited_once_with()
 
 
