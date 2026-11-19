@@ -559,6 +559,29 @@ async def test_websocket_player_notification(
 
 
 @websocket
+async def test_websocket_seek_refreshes_position(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test a seek in the playing library item refreshes the position."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get(ENTITY_ID).attributes[ATTR_MEDIA_POSITION] == 4205
+
+    await set_playing(
+        hass,
+        mock_kodi,
+        time={"hours": 1, "minutes": 11, "seconds": 0, "milliseconds": 71},
+    )
+    mock_connection.server.Player.OnSeek("xbmc", player_notification(1))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(ENTITY_ID).attributes[ATTR_MEDIA_POSITION] == 4260
+
+
+@websocket
 async def test_websocket_refresh_failure(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,

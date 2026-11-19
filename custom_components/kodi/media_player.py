@@ -171,15 +171,7 @@ class KodiEntity(MediaPlayerEntity):
     def async_on_speed_event(self, sender, data):
         """Handle player changes between playing and paused."""
         self._properties["speed"] = data["player"]["speed"]
-
-        if not hasattr(data["item"], "id"):
-            # If no item id is given, perform a full update
-            force_refresh = True
-        else:
-            # If a new item is playing, force a complete refresh
-            force_refresh = data["item"]["id"] != self._item.get("id")
-
-        self.async_schedule_update_ha_state(force_refresh)
+        self.async_schedule_update_ha_state(True)
 
     @callback
     def async_on_stop(self, sender, data):
