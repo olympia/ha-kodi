@@ -11,6 +11,7 @@ It is the Kodi integration of the Home Assistant Core dev branch with:
 - a fix for a refresh that went on after Kodi stopped playing or quit ([home-assistant/core#192353](https://github.com/home-assistant/core/pull/192353))
 - the connection to Kodi owned by the config entry instead of the media player, which closes the connection on unload and on stop, and no longer reconnects an entry that was unloaded during startup
 - a check of the username and password at setup, after a failed poll of an entry without WebSocket, and while the WebSocket is connected, with at most one HTTP ping a minute; when the web server of Kodi rejects them, Home Assistant asks for new credentials
+- one info message when Kodi becomes unavailable and one when it is available again, so a restart of Kodi no longer leaves a warning in the log
 
 The [roadmap](#roadmap) lists what comes next.
 

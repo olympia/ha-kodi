@@ -7,11 +7,13 @@ from datetime import datetime, timedelta
 import logging
 from typing import Any
 
+from aiohttp import ClientError
 from jsonrpc_base.jsonrpc import ProtocolError, TransportError
 from pykodi import CannotConnectError, InvalidAuthError, Kodi
 from pykodi.kodi import KodiHTTPConnection, KodiWSConnection
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import CONF_HOST
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
@@ -24,6 +26,22 @@ CREDENTIAL_CHECK_INTERVAL = timedelta(minutes=1)
 SYSTEM_NOTIFICATIONS = ("System.OnQuit", "System.OnRestart", "System.OnSleep")
 
 type KodiConfigEntry = ConfigEntry[KodiConnectionManager]
+
+
+def _error_text(error: BaseException) -> str:
+    """Return a short text of the error behind a failed Kodi request."""
+    # Most pykodi errors carry no text, their cause does
+    error = error.__cause__ or error
+    if isinstance(error, TransportError) and error.args:
+        # jsonrpc passes the network error after the text
+        if isinstance(error.args[-1], (ClientError, TimeoutError)):
+            error = error.args[-1]
+        else:
+            return str(error.args[0])
+    elif isinstance(error, ProtocolError) and len(error.args) == 3:
+        # An error response from Kodi: code, message and the whole response
+        return f"{error.args[1]} ({error.args[0]})"
+    return str(error) or type(error).__name__
 
 
 class KodiConnectionManager:
@@ -54,7 +72,7 @@ class KodiConnectionManager:
         self._listeners: list[CALLBACK_TYPE] = []
         self._unsubscribe: list[Callable[[], None]] = []
         self._watchdog_task: asyncio.Task[None] | None = None
-        self._connect_error = False
+        self._unavailable_logged = False
         self._credential_check_task: asyncio.Task[None] | None = None
         self._last_credential_check: float | None = None
 
@@ -158,8 +176,8 @@ class KodiConnectionManager:
         if not self.connection.connected:
             try:
                 await self._async_connect()
-            except CannotConnectError, TransportError, ProtocolError:
-                self._async_log_once("Unable to connect to Kodi via websocket")
+            except (CannotConnectError, TransportError, ProtocolError) as error:
+                self.async_log_unavailable(error)
                 self._async_set_version(None)
                 return
         else:
@@ -167,12 +185,12 @@ class KodiConnectionManager:
                 await self.kodi.ping()
                 if self.version is None:
                     await self._async_read_version()
-            except CannotConnectError, TransportError, ProtocolError:
-                self._async_log_once("Unable to ping Kodi via websocket")
+            except (CannotConnectError, TransportError, ProtocolError) as error:
+                self.async_log_unavailable(error)
                 self._async_set_version(None)
                 await self.connection.close()
                 return
-        self._connect_error = False
+        self.async_log_available()
         # Kodi does not check credentials over WebSocket
         self.async_check_credentials()
 
@@ -197,7 +215,19 @@ class KodiConnectionManager:
             listener()
 
     @callback
-    def _async_log_once(self, message: str) -> None:
-        if not self._connect_error:
-            self._connect_error = True
-            _LOGGER.warning(message)
+    def async_log_unavailable(self, error: Exception) -> None:
+        """Log the first failure of an outage."""
+        if not self._unavailable_logged:
+            self._unavailable_logged = True
+            _LOGGER.info(
+                "Kodi at %s is unavailable: %s",
+                self.entry.data[CONF_HOST],
+                _error_text(error),
+            )
+
+    @callback
+    def async_log_available(self) -> None:
+        """Log the end of an outage."""
+        if self._unavailable_logged:
+            self._unavailable_logged = False
+            _LOGGER.info("Kodi at %s is available again", self.entry.data[CONF_HOST])

@@ -7,6 +7,7 @@ import logging
 from typing import Any
 from unittest.mock import MagicMock
 
+from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
 from jsonrpc_base.jsonrpc import ProtocolError, TransportError
 from pykodi import CannotConnectError
@@ -45,6 +46,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from . import AUDIO_PLAYER, VIDEO_PLAYER, set_idle, set_playing, setup_integration
@@ -81,6 +83,21 @@ async def start_home_assistant(hass: HomeAssistant) -> None:
     """Announce that Home Assistant has started."""
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
     await hass.async_block_till_done()
+
+
+def cannot_connect(cause: Exception) -> CannotConnectError:
+    """Return a PyKodi connection error raised from the given cause."""
+    error = CannotConnectError()
+    error.__cause__ = cause
+    return error
+
+
+def info_records(caplog: pytest.LogCaptureFixture, text: str) -> int:
+    """Return how many records at info level contain the text."""
+    return sum(
+        record.levelno == logging.INFO and text in record.getMessage()
+        for record in caplog.records
+    )
 
 
 async def pass_watchdog_interval(hass: HomeAssistant) -> None:
@@ -782,7 +799,7 @@ async def test_watchdog_ping_failure(
     caplog: pytest.LogCaptureFixture,
     error: Exception,
 ) -> None:
-    """Test a failed ping turns the state off and warns only once."""
+    """Test a failed ping turns the state off and logs only once."""
     await set_playing(hass, mock_kodi)
     await setup_integration(hass, mock_config_entry)
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.PLAYING
@@ -795,8 +812,7 @@ async def test_watchdog_ping_failure(
 
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
 
-    assert caplog.text.count("Unable to ping Kodi via websocket") == 1
-    assert "Unable to connect to Kodi via websocket" not in caplog.text
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
 
 
 @websocket
@@ -808,7 +824,7 @@ async def test_watchdog_connect_failure(
     freezer: FrozenDateTimeFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test a failed reconnect keeps the state off and warns only once."""
+    """Test a failed reconnect keeps the state off and logs only once."""
     mock_connection.connected = False
     mock_connection.connect.side_effect = CannotConnectError
     await setup_integration(hass, mock_config_entry)
@@ -816,12 +832,12 @@ async def test_watchdog_connect_failure(
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
 
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.OFF
-    assert caplog.text.count("Unable to connect to Kodi via websocket") == 1
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
     mock_connection.close.assert_not_awaited()
 
 
 @websocket
-async def test_watchdog_warns_again_after_ping_failure_and_reconnect(
+async def test_watchdog_logs_again_after_ping_failure_and_reconnect(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_connection: MagicMock,
@@ -839,19 +855,19 @@ async def test_watchdog_warns_again_after_ping_failure_and_reconnect(
 
     mock_kodi.ping.side_effect = TransportError("Connection lost")
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
-    assert caplog.text.count("Unable to ping Kodi via websocket") == 1
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
     assert not mock_connection.connected
 
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
     assert mock_connection.connected
 
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
-    assert caplog.text.count("Unable to ping Kodi via websocket") == 2
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 2
 
 
 @websocket
 @pytest.mark.usefixtures("mock_kodi")
-async def test_watchdog_warns_again_after_reconnect(
+async def test_watchdog_logs_again_after_reconnect(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_connection: MagicMock,
@@ -866,7 +882,7 @@ async def test_watchdog_warns_again_after_reconnect(
     mock_connection.connected = False
     mock_connection.connect.side_effect = CannotConnectError
     await setup_integration(hass, mock_config_entry)
-    assert caplog.text.count("Unable to connect to Kodi via websocket") == 1
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
 
     mock_connection.connect.side_effect = connect
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
@@ -877,7 +893,7 @@ async def test_watchdog_warns_again_after_reconnect(
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
 
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.OFF
-    assert caplog.text.count("Unable to connect to Kodi via websocket") == 2
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 2
 
 
 @websocket
@@ -907,12 +923,13 @@ async def test_watchdog_reconnect_without_version(
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
 
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.OFF
-    assert caplog.text.count("Unable to connect to Kodi via websocket") == 1
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
 
     mock_kodi.get_application_properties.side_effect = get_application_properties
     await advance_time(hass, freezer, WATCHDOG_INTERVAL)
 
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.IDLE
+    assert info_records(caplog, "Kodi at 1.1.1.1 is available again") == 1
 
 
 @websocket
@@ -1031,7 +1048,7 @@ async def test_watchdog_recovers_from_failed_version_request(
         (DOMAIN, mock_config_entry.unique_id), mock_config_entry.entry_id
     )
     assert device.sw_version == "21.2"
-    assert "Unable to" not in caplog.text
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 0
 
 
 @websocket
@@ -1053,7 +1070,7 @@ async def test_watchdog_closes_connection_without_version(
 
     assert hass.states.get(ENTITY_ID).state == MediaPlayerState.OFF
     mock_connection.close.assert_awaited_once()
-    assert caplog.text.count("Unable to ping Kodi via websocket") == 1
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
 
 
 @websocket
@@ -1197,3 +1214,202 @@ async def test_empty_series_title_and_album(
     attributes = hass.states.get(ENTITY_ID).attributes
     assert ATTR_MEDIA_SERIES_TITLE not in attributes
     assert ATTR_MEDIA_ALBUM_NAME not in attributes
+
+
+@websocket
+@pytest.mark.usefixtures("mock_kodi")
+async def test_watchdog_logs_available_again_once(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test the end of an outage is logged once, at info level."""
+
+    async def connect() -> None:
+        mock_connection.connected = True
+
+    mock_connection.connected = False
+    mock_connection.connect.side_effect = CannotConnectError
+    await setup_integration(hass, mock_config_entry)
+    assert info_records(caplog, "Kodi at 1.1.1.1 is available again") == 0
+    mock_connection.connect.side_effect = connect
+
+    await advance_time(hass, freezer, WATCHDOG_INTERVAL)
+    await advance_time(hass, freezer, WATCHDOG_INTERVAL)
+
+    assert info_records(caplog, "Kodi at 1.1.1.1 is available again") == 1
+    assert not [
+        record
+        for record in caplog.records
+        if DOMAIN in record.name.split(".") and record.levelno > logging.INFO
+    ]
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_poll_logs_unavailable_and_available_once(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test failed polls of an entry without websocket are logged once per outage."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = TransportError("Connection refused")
+
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    assert (
+        info_records(caplog, "Kodi at 1.1.1.1 is unavailable: Connection refused") == 1
+    )
+    assert info_records(caplog, "Kodi at 1.1.1.1 is available again") == 0
+
+    mock_kodi.get_players.side_effect = None
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    assert info_records(caplog, "Kodi at 1.1.1.1 is available again") == 1
+    assert not [
+        record
+        for record in caplog.records
+        if DOMAIN in record.name.split(".") and record.levelno > logging.INFO
+    ]
+
+
+@websocket
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        pytest.param(
+            cannot_connect(
+                TransportError(
+                    "Transport Error",
+                    None,
+                    ClientConnectionError("Connect call failed"),
+                )
+            ),
+            "Kodi at 1.1.1.1 is unavailable: Connect call failed",
+            id="cause",
+        ),
+        pytest.param(
+            cannot_connect(TimeoutError()),
+            "Kodi at 1.1.1.1 is unavailable: TimeoutError",
+            id="timeout",
+        ),
+        pytest.param(
+            TransportError("Transport Error", None, TimeoutError()),
+            "Kodi at 1.1.1.1 is unavailable: TimeoutError",
+            id="transport_timeout",
+        ),
+        pytest.param(
+            TransportError("Connection lost"),
+            "Kodi at 1.1.1.1 is unavailable: Connection lost",
+            id="transport_error",
+        ),
+        pytest.param(
+            TransportError(
+                "Cannot deserialize response body", None, ValueError("Expecting value")
+            ),
+            "Kodi at 1.1.1.1 is unavailable: Cannot deserialize response body",
+            id="invalid_response",
+        ),
+        pytest.param(
+            TransportError.__new__(TransportError),
+            "Kodi at 1.1.1.1 is unavailable: TransportError",
+            id="transport_error_without_args",
+        ),
+        pytest.param(
+            ProtocolError(
+                -32100, "Failed to execute method.", {"id": "1", "error": {}}
+            ),
+            "Kodi at 1.1.1.1 is unavailable: Failed to execute method. (-32100)",
+            id="error_response",
+        ),
+        pytest.param(
+            CannotConnectError(),
+            "Kodi at 1.1.1.1 is unavailable: CannotConnectError",
+            id="no_text",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("mock_kodi")
+async def test_unavailable_log_names_the_cause(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    text: str,
+) -> None:
+    """Test the unavailable log shows the error behind the PyKodi exception."""
+    mock_connection.connected = False
+    mock_connection.connect.side_effect = error
+
+    await setup_integration(hass, mock_config_entry)
+
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.INFO and "is unavailable" in record.getMessage()
+    ] == [text]
+
+
+@websocket
+async def test_websocket_update_does_not_log_available(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a refresh while the watchdog reads no version keeps the outage open."""
+
+    async def connect() -> None:
+        mock_connection.connected = True
+
+    await async_setup_component(hass, "homeassistant", {})
+    mock_connection.connect.side_effect = connect
+    await setup_integration(hass, mock_config_entry)
+    mock_connection.connected = False
+    mock_kodi.get_application_properties.side_effect = ProtocolError(-32100, "Failed")
+    await advance_time(hass, freezer, WATCHDOG_INTERVAL)
+    assert mock_connection.connected
+
+    mock_kodi.get_players.reset_mock()
+    await hass.services.async_call(
+        "homeassistant", "update_entity", {"entity_id": ENTITY_ID}, blocking=True
+    )
+
+    mock_kodi.get_players.assert_awaited()
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
+    assert info_records(caplog, "is available again") == 0
+
+
+@websocket
+async def test_websocket_update_error_does_not_log_unavailable(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_kodi: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a failed refresh over websocket leaves the outage to the watchdog."""
+
+    async def connect() -> None:
+        mock_connection.connected = True
+
+    await async_setup_component(hass, "homeassistant", {})
+    mock_connection.connect.side_effect = connect
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.reset_mock()
+    mock_kodi.get_players.side_effect = TransportError("No reply")
+
+    await hass.services.async_call(
+        "homeassistant", "update_entity", {"entity_id": ENTITY_ID}, blocking=True
+    )
+
+    mock_kodi.get_players.assert_awaited()
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 0

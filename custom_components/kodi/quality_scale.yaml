@@ -46,9 +46,7 @@ rules:
     status: todo
     comment: The media player reports off when Kodi cannot be reached, also when no turn on automation exists.
   integration-owner: done
-  log-when-unavailable:
-    status: todo
-    comment: Over WebSocket a lost connection is logged once as a warning and the reconnection is not logged, over HTTP neither is logged.
+  log-when-unavailable: done
   parallel-updates:
     status: todo
     comment: The media_player and notify platforms do not set PARALLEL_UPDATES.

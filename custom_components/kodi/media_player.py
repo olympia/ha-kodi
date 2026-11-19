@@ -283,8 +283,9 @@ class KodiEntity(MediaPlayerEntity):
 
         try:
             players = await self._kodi.get_players()
-        except TransportError, ProtocolError:
+        except (TransportError, ProtocolError) as error:
             if not self._connection.can_subscribe:
+                self._manager.async_log_unavailable(error)
                 self._manager.async_check_credentials()
                 self._reset_state()
                 return
@@ -292,6 +293,10 @@ class KodiEntity(MediaPlayerEntity):
 
         if generation != self._state_generation:
             return
+
+        # Over WebSocket the watchdog decides whether Kodi is available
+        if not self._connection.can_subscribe:
+            self._manager.async_log_available()
 
         if not players:
             self._reset_state(players)
