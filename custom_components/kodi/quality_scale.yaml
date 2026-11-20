@@ -14,10 +14,8 @@ rules:
     status: exempt
     comment: The integration does not provide conditions.
   docs-high-level-description: done
-  docs-installation-instructions:
-    status: todo
-    comment: There is no prerequisites section. The page only mentions the web interface, for discovery, and not the Kodi settings Allow remote control via HTTP and Allow remote control from applications on other systems.
-  docs-removal-instructions: todo
+  docs-installation-instructions: done
+  docs-removal-instructions: done
   docs-triggers: done
   entity-event-setup: done
   entity-unique-id: done
@@ -35,7 +33,7 @@ rules:
   docs-configuration-parameters:
     status: exempt
     comment: The integration has no options flow.
-  docs-installation-parameters: todo
+  docs-installation-parameters: done
   entity-unavailable:
     status: todo
     comment: The media player reports off when Kodi cannot be reached, also when no turn on automation exists.
@@ -60,7 +58,7 @@ rules:
   discovery: done
   docs-data-update: todo
   docs-examples: done
-  docs-known-limitations: todo
+  docs-known-limitations: done
   docs-supported-devices: todo
   docs-supported-functions: todo
   docs-troubleshooting: todo
