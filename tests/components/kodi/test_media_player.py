@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from datetime import timedelta
 import logging
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
@@ -39,12 +39,14 @@ from homeassistant.components.media_player import (
     MediaType,
 )
 from homeassistant.const import (
+    ATTR_ENTITY_ID,
     ATTR_ENTITY_PICTURE,
     EVENT_HOMEASSISTANT_STARTED,
     EVENT_HOMEASSISTANT_STOP,
     STATE_UNAVAILABLE,
 )
 from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -1436,3 +1438,411 @@ async def test_websocket_update_error_does_not_log_unavailable(
 
     mock_kodi.get_players.assert_awaited()
     assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 0
+
+
+def _artist(artist_id: int, name: str) -> dict[str, Any]:
+    return {"artist": name, "artistid": artist_id, "label": name}
+
+
+def _album(album_id: int, title: str, artist_id: int) -> dict[str, Any]:
+    return {"albumid": album_id, "artistid": [artist_id], "label": title}
+
+
+def _song(song_id: int, title: str, artist_id: int) -> dict[str, Any]:
+    return {"artistid": [artist_id], "label": title, "songid": song_id}
+
+
+LIBRARY = {
+    "artists": [
+        _artist(1, "MrX Lamp"),
+        _artist(2, "Mr. Lamp"),
+        _artist(3, "[Missing Tag]"),
+        _artist(4, "The Lanterns"),
+    ],
+    "albums": [
+        _album(10, "Harbour Lights", 4),
+        _album(11, "Night Drive", 4),
+        _album(12, "Night Drive", 2),
+        _album(13, "Unknown", 3),
+    ],
+    "songs": [
+        _song(20, "Night Drive", 4),
+        _song(21, "Night Drive (Live)", 4),
+        _song(22, "Morning Light", 2),
+        _song(23, "Night Drive", 2),
+        _song(24, "Lamp Post", 2),
+        _song(25, "Lamp\u00a0Light", 2),
+    ],
+}
+EMPTY_LIBRARY: dict[str, list[dict[str, Any]]] = {
+    "artists": [],
+    "albums": [],
+    "songs": [],
+}
+
+
+def set_library(mock_kodi: MagicMock, library: dict[str, list[dict[str, Any]]]) -> None:
+    """Answer the library queries of the client like Kodi does."""
+
+    def result(key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+        limits = {"limits": {"end": len(items), "start": 0, "total": len(items)}}
+        return {key: items, **limits} if items else limits
+
+    def by_artist(key: str, artist_id: int | None) -> dict[str, Any]:
+        # Without properties Kodi only returns the ID and the label
+        return result(
+            key,
+            [
+                {field: value for field, value in item.items() if field != "artistid"}
+                for item in library[key]
+                if not artist_id or artist_id in item["artistid"]
+            ],
+        )
+
+    mock_kodi.get_artists.side_effect = lambda properties=None: result(
+        "artists", library["artists"]
+    )
+    mock_kodi.get_albums.side_effect = (
+        lambda artist_id=None, album_id=None, properties=None: by_artist(
+            "albums", artist_id
+        )
+    )
+    mock_kodi.get_songs.side_effect = (
+        lambda artist_id=None, album_id=None, properties=None: by_artist(
+            "songs", artist_id
+        )
+    )
+
+
+def playlist_writes(mock_kodi: MagicMock) -> list[Any]:
+    """Return the calls of the client that add to the playlist."""
+    return [
+        client_call
+        for client_call in mock_kodi.mock_calls
+        if client_call[0].startswith("add_")
+    ]
+
+
+async def add_to_playlist(hass: HomeAssistant, **data: str) -> None:
+    """Call the add_to_playlist action on the Kodi media player."""
+    await hass.services.async_call(
+        DOMAIN,
+        "add_to_playlist",
+        {ATTR_ENTITY_ID: ENTITY_ID, **data},
+        blocking=True,
+    )
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("data", "method", "item_id"),
+    [
+        pytest.param(
+            {"media_type": "SONG", "media_id": "22"},
+            "add_song_to_playlist",
+            22,
+            id="song_id",
+        ),
+        pytest.param(
+            {"media_type": "SONG", "media_id": "22", "media_name": "Night Drive"},
+            "add_song_to_playlist",
+            22,
+            id="song_id_before_name",
+        ),
+        pytest.param(
+            {"media_type": "ALBUM", "media_id": "12"},
+            "add_album_to_playlist",
+            12,
+            id="album_id",
+        ),
+        pytest.param(
+            {"media_type": "ALBUM", "media_id": "12", "media_name": "Harbour Lights"},
+            "add_album_to_playlist",
+            12,
+            id="album_id_before_name",
+        ),
+        pytest.param(
+            {"media_type": "SONG", "media_name": "night drive"},
+            "add_song_to_playlist",
+            20,
+            id="first_best_song",
+        ),
+        pytest.param(
+            {"media_type": "SONG", "media_name": "Night Drive (Live)"},
+            "add_song_to_playlist",
+            21,
+            id="song_name_with_parentheses",
+        ),
+        pytest.param(
+            {"media_type": "SONG", "media_name": "Lamp\u00a0Light"},
+            "add_song_to_playlist",
+            25,
+            id="song_name_with_no_break_space",
+        ),
+        pytest.param(
+            {
+                "media_type": "SONG",
+                "media_name": "Night Drive",
+                "artist_name": "Mr. Lamp",
+            },
+            "add_song_to_playlist",
+            23,
+            id="song_of_artist_with_dot",
+        ),
+        pytest.param(
+            {"media_type": "SONG", "media_name": "morning  drive "},
+            "add_song_to_playlist",
+            20,
+            id="partial_song_name",
+        ),
+        pytest.param(
+            {
+                "media_type": "ALBUM",
+                "media_name": "Night Drive",
+                "artist_name": "Mr. Lamp",
+            },
+            "add_album_to_playlist",
+            12,
+            id="album_of_artist",
+        ),
+        pytest.param(
+            {"media_type": "ALBUM", "media_name": "harbour"},
+            "add_album_to_playlist",
+            10,
+            id="partial_album_name",
+        ),
+    ],
+)
+async def test_add_to_playlist(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    data: dict[str, str],
+    method: str,
+    item_id: int,
+) -> None:
+    """Test adding a song or an album to the playlist by ID or by name."""
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+
+    await add_to_playlist(hass, **data)
+
+    assert playlist_writes(mock_kodi) == [getattr(call, method)(item_id)]
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("data", "album_ids"),
+    [
+        pytest.param({"artist_name": "The Lanterns"}, [10, 11], id="no_media_name"),
+        pytest.param(
+            {"media_name": "", "artist_name": "The Lanterns"},
+            [10, 11],
+            id="empty_media_name",
+        ),
+        pytest.param(
+            {"media_name": "ALL", "artist_name": "the lanterns"}, [10, 11], id="all"
+        ),
+        pytest.param({"artist_name": "[Missing Tag]"}, [13], id="artist_with_brackets"),
+    ],
+)
+async def test_add_all_albums_to_playlist(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    data: dict[str, str],
+    album_ids: list[int],
+) -> None:
+    """Test adding all albums of an artist to the playlist."""
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+
+    await add_to_playlist(hass, media_type="ALBUM", **data)
+
+    assert playlist_writes(mock_kodi) == [
+        call.add_album_to_playlist(album_id) for album_id in album_ids
+    ]
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("library", "data", "translation_key", "placeholders"),
+    [
+        pytest.param(
+            LIBRARY,
+            {"media_type": "song", "media_id": "22"},
+            "invalid_media_type",
+            {"media_type": "song"},
+            id="media_type",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "SONG", "media_id": "22a"},
+            "invalid_media_id",
+            {"media_id": "22a"},
+            id="song_id",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "SONG", "media_id": ""},
+            "invalid_media_id",
+            {"media_id": ""},
+            id="empty_song_id",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "ALBUM", "media_id": "twelve"},
+            "invalid_media_id",
+            {"media_id": "twelve"},
+            id="album_id",
+        ),
+        pytest.param(
+            LIBRARY, {"media_type": "SONG"}, "missing_media", None, id="no_song"
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "SONG", "media_name": ""},
+            "missing_media",
+            None,
+            id="empty_song_name",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "ALBUM"},
+            "missing_artist_name",
+            None,
+            id="all_albums_without_artist",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "ALBUM", "media_name": ""},
+            "missing_artist_name",
+            None,
+            id="empty_album_name_without_artist",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "SONG", "media_name": "Thunder Road"},
+            "song_not_found",
+            {"media_name": "Thunder Road"},
+            id="song",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "SONG", "media_name": "Driv"},
+            "song_not_found",
+            {"media_name": "Driv"},
+            id="part_of_word",
+        ),
+        pytest.param(
+            LIBRARY,
+            {
+                "media_type": "SONG",
+                "media_name": "Morning Light",
+                "artist_name": "The Lanterns",
+            },
+            "song_not_found",
+            {"media_name": "Morning Light"},
+            id="song_of_other_artist",
+        ),
+        pytest.param(
+            EMPTY_LIBRARY,
+            {"media_type": "SONG", "media_name": "Night Drive"},
+            "song_not_found",
+            {"media_name": "Night Drive"},
+            id="song_in_empty_library",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "ALBUM", "media_name": "Thunder Road"},
+            "album_not_found",
+            {"media_name": "Thunder Road"},
+            id="album",
+        ),
+        pytest.param(
+            EMPTY_LIBRARY,
+            {"media_type": "ALBUM", "media_name": "Night Drive"},
+            "album_not_found",
+            {"media_name": "Night Drive"},
+            id="album_in_empty_library",
+        ),
+        pytest.param(
+            LIBRARY,
+            {
+                "media_type": "SONG",
+                "media_name": "Night Drive",
+                "artist_name": "Mister",
+            },
+            "artist_not_found",
+            {"artist_name": "Mister"},
+            id="artist_of_song",
+        ),
+        pytest.param(
+            LIBRARY,
+            {
+                "media_type": "ALBUM",
+                "media_name": "Night Drive",
+                "artist_name": "Mister",
+            },
+            "artist_not_found",
+            {"artist_name": "Mister"},
+            id="artist_of_album",
+        ),
+        pytest.param(
+            EMPTY_LIBRARY,
+            {"media_type": "ALBUM", "artist_name": "The Lanterns"},
+            "artist_not_found",
+            {"artist_name": "The Lanterns"},
+            id="artist_in_empty_library",
+        ),
+        pytest.param(
+            LIBRARY,
+            {"media_type": "ALBUM", "media_name": "ALL", "artist_name": "MrX Lamp"},
+            "no_albums",
+            {"artist_name": "MrX Lamp"},
+            id="artist_without_albums",
+        ),
+    ],
+)
+async def test_add_to_playlist_invalid_input(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    library: dict[str, list[dict[str, Any]]],
+    data: dict[str, str],
+    translation_key: str,
+    placeholders: dict[str, str] | None,
+) -> None:
+    """Test invalid input or media missing from the library adds nothing."""
+    set_library(mock_kodi, library)
+    await setup_integration(hass, mock_config_entry)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await add_to_playlist(hass, **data)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == translation_key
+    assert exc_info.value.translation_placeholders == placeholders
+    assert playlist_writes(mock_kodi) == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "error", [TransportError("No reply"), ProtocolError("Invalid params")]
+)
+async def test_add_to_playlist_library_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    error: Exception,
+) -> None:
+    """Test an error of the Kodi library is not reported as invalid input."""
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_songs.side_effect = error
+
+    with pytest.raises(type(error)) as exc_info:
+        await add_to_playlist(hass, media_type="SONG", media_name="Night Drive")
+
+    assert exc_info.value is error
+    assert playlist_writes(mock_kodi) == []

@@ -20,6 +20,7 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.const import ATTR_ENTITY_ID, CONF_DEVICE_ID, CONF_NAME, CONF_TYPE
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -57,6 +58,24 @@ MEDIA_TYPES = {
     # Type 'audio' is used for audio media, that Kodi couldn't scroblle
     "audio": MediaType.MUSIC,
 }
+
+
+def _validation_error(key: str, **placeholders: str) -> ServiceValidationError:
+    """Return a translated error for invalid input of an action."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=key,
+        translation_placeholders=placeholders or None,
+    )
+
+
+def _media_id(media_id: str | int) -> int:
+    """Return the media ID of an action as a number."""
+    try:
+        return int(media_id)
+    except ValueError as err:
+        raise _validation_error("invalid_media_id", media_id=str(media_id)) from err
+
 
 MAP_KODI_MEDIA_TYPES: dict[MediaType | str, str] = {
     MediaType.MOVIE: "movieid",
@@ -670,7 +689,7 @@ class KodiEntity(MediaPlayerEntity):
             await self._kodi.add_song_to_playlist(int(media_id))
 
     async def async_add_media_to_playlist(
-        self, media_type, media_id=None, media_name="ALL", artist_name=""
+        self, media_type, media_id=None, media_name=None, artist_name=""
     ):
         """Add a media to default playlist.
 
@@ -682,91 +701,87 @@ class KodiEntity(MediaPlayerEntity):
         """
         if media_type == "SONG":
             if media_id is None:
+                if not media_name:
+                    raise _validation_error("missing_media")
                 media_id = await self._async_find_song(media_name, artist_name)
-            if media_id:
-                await self._kodi.add_song_to_playlist(int(media_id))
+            await self._kodi.add_song_to_playlist(_media_id(media_id))
 
         elif media_type == "ALBUM":
             if media_id is None:
-                if media_name == "ALL":
+                if not media_name or media_name == "ALL":
                     await self._async_add_all_albums(artist_name)
                     return
 
                 media_id = await self._async_find_album(media_name, artist_name)
-            if media_id:
-                await self._kodi.add_album_to_playlist(int(media_id))
+            await self._kodi.add_album_to_playlist(_media_id(media_id))
 
         else:
-            raise RuntimeError("Unrecognized media type.")
-
-        if media_id is None:
-            _LOGGER.warning("No media detected for Playlist.Add")
+            raise _validation_error("invalid_media_type", media_type=media_type)
 
     async def _async_add_all_albums(self, artist_name):
         """Add all albums of an artist to default playlist (i.e. playlistid=0).
 
         The artist is specified in terms of name.
         """
+        if not artist_name:
+            raise _validation_error("missing_artist_name")
         artist_id = await self._async_find_artist(artist_name)
 
         albums = await self._kodi.get_albums(artist_id)
+        # Kodi leaves out the list when nothing matches
+        if not albums.get("albums"):
+            raise _validation_error("no_albums", artist_name=artist_name)
 
         for alb in albums["albums"]:
             await self._kodi.add_album_to_playlist(int(alb["albumid"]))
 
     async def _async_find_artist(self, artist_name):
         """Find artist by name."""
-        artists = await self._kodi.get_artists()
-        try:
-            out = self._find(artist_name, [a["artist"] for a in artists["artists"]])
-            return artists["artists"][out[0][0]]["artistid"]
-        except KeyError:
-            _LOGGER.warning("No artists were found: %s", artist_name)
-            return None
+        artists = (await self._kodi.get_artists()).get("artists", [])
+        index = self._find(artist_name, [a["artist"] for a in artists])
+        if index is None:
+            raise _validation_error("artist_not_found", artist_name=artist_name)
+        return artists[index]["artistid"]
 
     async def _async_find_song(self, song_name, artist_name=""):
         """Find song by name and optionally artist name."""
         artist_id = None
-        if artist_name != "":
+        if artist_name:
             artist_id = await self._async_find_artist(artist_name)
 
-        songs = await self._kodi.get_songs(artist_id)
-        if songs["limits"]["total"] == 0:
-            return None
-
-        out = self._find(song_name, [a["label"] for a in songs["songs"]])
-        return songs["songs"][out[0][0]]["songid"]
+        songs = (await self._kodi.get_songs(artist_id)).get("songs", [])
+        index = self._find(song_name, [a["label"] for a in songs])
+        if index is None:
+            raise _validation_error("song_not_found", media_name=song_name)
+        return songs[index]["songid"]
 
     async def _async_find_album(self, album_name, artist_name=""):
         """Find album by name and optionally artist name."""
         artist_id = None
-        if artist_name != "":
+        if artist_name:
             artist_id = await self._async_find_artist(artist_name)
 
-        albums = await self._kodi.get_albums(artist_id)
-        try:
-            out = self._find(album_name, [a["label"] for a in albums["albums"]])
-            return albums["albums"][out[0][0]]["albumid"]
-        except KeyError:
-            _LOGGER.warning(
-                "No albums were found with artist: %s, album: %s",
-                artist_name,
-                album_name,
-            )
-            return None
+        albums = (await self._kodi.get_albums(artist_id)).get("albums", [])
+        index = self._find(album_name, [a["label"] for a in albums])
+        if index is None:
+            raise _validation_error("album_not_found", media_name=album_name)
+        return albums[index]["albumid"]
 
     @staticmethod
-    def _find(key_word, words):
-        key_word = key_word.split(" ")
-        patt = [re.compile(f"(^| ){k}( |$)", re.IGNORECASE) for k in key_word]
-
-        out = [[i, 0] for i in range(len(words))]
-        for i in range(len(words)):
-            mtc = [p.search(words[i]) for p in patt]
-            rate = [m is not None for m in mtc].count(True)
-            out[i][1] = rate
-
-        return sorted(out, key=lambda out: out[1], reverse=True)
+    def _find(key_word: str, words: list[str]) -> int | None:
+        """Return the index of the first item matching the most key words."""
+        patterns = [
+            re.compile(f"(^| ){re.escape(key)}( |$)", re.IGNORECASE)
+            for key in key_word.split(" ")
+        ]
+        best_index = None
+        best_rate = 0
+        for index, word in enumerate(words):
+            rate = sum(pattern.search(word) is not None for pattern in patterns)
+            if rate > best_rate:
+                best_index = index
+                best_rate = rate
+        return best_index
 
     @override
     async def async_browse_media(

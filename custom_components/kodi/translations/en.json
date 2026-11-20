@@ -83,11 +83,35 @@
         }
     },
     "exceptions": {
+        "album_not_found": {
+            "message": "No album matching {media_name} was found in the Kodi music library."
+        },
+        "artist_not_found": {
+            "message": "No artist matching {artist_name} was found in the Kodi music library."
+        },
+        "invalid_media_id": {
+            "message": "Media ID {media_id} is not a number."
+        },
+        "invalid_media_type": {
+            "message": "Media type {media_type} is not supported. Use `SONG` or `ALBUM`."
+        },
         "login_failed": {
             "message": "Login to {host} failed"
         },
+        "missing_artist_name": {
+            "message": "Enter an artist name to add all albums of an artist."
+        },
+        "missing_media": {
+            "message": "Enter a media ID or a media name to add a song."
+        },
+        "no_albums": {
+            "message": "Artist {artist_name} has no albums in the Kodi music library."
+        },
         "notify_failed": {
             "message": "Unable to send the notification to Kodi. Is Kodi online?"
+        },
+        "song_not_found": {
+            "message": "No song matching {media_name} was found in the Kodi music library."
         }
     },
     "services": {

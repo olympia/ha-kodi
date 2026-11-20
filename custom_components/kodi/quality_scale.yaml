@@ -1,8 +1,6 @@
 rules:
   # Bronze
-  action-setup:
-    status: todo
-    comment: kodi.add_to_playlist raises RuntimeError or ValueError for invalid input, and a name that matches nothing adds the first item of the library or only logs a warning, instead of raising ServiceValidationError.
+  action-setup: done
   appropriate-polling: done
   brands: done
   common-modules: done
@@ -32,7 +30,7 @@ rules:
   # Silver
   action-exceptions:
     status: todo
-    comment: Failed entity commands and kodi.call_method are logged instead of raised, kodi.add_to_playlist lets library errors through, the notify service lets ProtocolError through, and invalid input or a missing player raises RuntimeError or ValueError instead of ServiceValidationError.
+    comment: Failed entity commands and kodi.call_method are logged instead of raised, kodi.add_to_playlist lets library errors through, the notify service lets ProtocolError through, and invalid input of play_media or shuffle without a player raises ValueError or RuntimeError instead of ServiceValidationError.
   config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt
@@ -84,7 +82,7 @@ rules:
     comment: The media player uses the name of its device.
   exception-translations:
     status: todo
-    comment: The errors of media browsing and of invalid action input are not translated.
+    comment: The errors of media browsing, of invalid play_media input and of shuffle without a player are not translated.
   icon-translations:
     status: exempt
     comment: The media player has no icon of its own.
