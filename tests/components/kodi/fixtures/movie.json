@@ -1,5 +1,10 @@
 {
   "album": "",
+  "art": {
+    "fanart": "image://https%3a%2f%2fimage.example.com%2fmovie-fanart.jpg/",
+    "icon": "image://DefaultVideo.png/",
+    "poster": "image://https%3a%2f%2fimage.example.com%2fmovie-poster.jpg/"
+  },
   "artist": [],
   "episode": -1,
   "file": "/media/movies/Movie (2026)/Movie.2026.2160p.mkv",

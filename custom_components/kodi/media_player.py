@@ -341,6 +341,7 @@ class KodiEntity(MediaPlayerEntity):
                 "file",
                 "uniqueid",
                 "thumbnail",
+                "art",
                 "artist",
                 "albumartist",
                 "showtitle",
@@ -426,10 +427,15 @@ class KodiEntity(MediaPlayerEntity):
     @override
     def media_image_url(self):
         """Image url of current playing media."""
-        if (thumbnail := self._item.get("thumbnail")) is None:
-            return None
+        if url := self._kodi.thumbnail_url(self._item.get("thumbnail")):
+            return url
 
-        return self._kodi.thumbnail_url(thumbnail)
+        # Movies can have an empty thumbnail, and pykodi only serves image:// thumbnails
+        art = self._item.get("art", {})
+        for art_type in ("poster", "thumb", "season.poster", "tvshow.poster"):
+            if url := self._kodi.thumbnail_url(art.get(art_type)):
+                return url
+        return None
 
     @property
     @override

@@ -1,6 +1,9 @@
 {
   "album": "Album",
   "albumartist": ["Album artist", "Other album artist"],
+  "art": {
+    "thumb": "image://music@%2fmedia%2fmusic%2fArtist%2fAlbum%2f01%20-%20Song%20title.flac/"
+  },
   "artist": ["Artist", "Featured artist"],
   "file": "/media/music/Artist/Album/01 - Song title.flac",
   "id": 3,

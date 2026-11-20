@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
+import hashlib
 import logging
 from typing import Any
 from unittest.mock import MagicMock, call
@@ -372,23 +373,188 @@ async def test_media_position_updated_at_after_idle(
     assert state.attributes[ATTR_MEDIA_POSITION_UPDATED_AT] == dt_util.utcnow()
 
 
+IMAGE_URL = "http://user:pass@1.1.1.1:8080/image/image%3A%2F%2F"
+
+
 @pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("player", "fixture", "url"),
+    [
+        pytest.param(
+            VIDEO_PLAYER,
+            "movie.json",
+            f"{IMAGE_URL}https%253a%252f%252fimage.example.com%252fmovie-poster.jpg%2F",
+            id="movie_poster",
+        ),
+        pytest.param(
+            VIDEO_PLAYER,
+            "episode.json",
+            f"{IMAGE_URL}https%253a%252f%252fimage.example.com%252fepisode.jpg%2F",
+            id="episode_thumbnail",
+        ),
+        pytest.param(
+            AUDIO_PLAYER,
+            "song.json",
+            f"{IMAGE_URL}music%40%252fmedia%252fmusic%252fArtist%252fAlbum%252f01%2520-%2520Song%2520title.flac%2F",
+            id="song_thumbnail",
+        ),
+        pytest.param(
+            VIDEO_PLAYER,
+            "channel.json",
+            f"{IMAGE_URL}pvrchannel_tv%40http%253a%252f%252fpvr.example.com%252fimagecache%252f80%2F",
+            id="channel_logo",
+        ),
+    ],
+)
+async def test_entity_picture_of_library_item(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    player: dict[str, Any],
+    fixture: str,
+    url: str,
+) -> None:
+    """Test the entity picture of the items Kodi was seen to send."""
+    item = await async_load_json_object_fixture(hass, fixture, DOMAIN)
+    await set_playing(hass, mock_kodi, item, [player])
+    await setup_integration(hass, mock_config_entry)
+
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    picture = hass.states.get(ENTITY_ID).attributes[ATTR_ENTITY_PICTURE]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+    assert picture.endswith(f"&cache={url_hash}")
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("item", "url"),
+    [
+        pytest.param(
+            {"label": "Movie", "thumbnail": "image://movie.jpg/"},
+            f"{IMAGE_URL}movie.jpg%2F",
+            id="thumbnail_without_art",
+        ),
+        pytest.param(
+            {
+                "label": "Movie",
+                "thumbnail": "image://video@%2fmedia%2fmovies%2fMovie%20(2026)%2fMovie.2026.2160p.mkv/",
+                "art": {
+                    "poster": "image://https%3a%2f%2fimage.example.com%2fmovie-poster.jpg/",
+                    "thumb": "image://video@%2fmedia%2fmovies%2fMovie%20(2026)%2fMovie.2026.2160p.mkv/",
+                },
+            },
+            f"{IMAGE_URL}video%40%252fmedia%252fmovies%252fMovie%2520%282026%29%252fMovie.2026.2160p.mkv%2F",
+            id="movie_extracted_thumbnail",
+        ),
+        pytest.param(
+            {
+                "label": "Episode",
+                "thumbnail": "",
+                "art": {
+                    "season.poster": "image://https%3a%2f%2fimage.example.com%2fseason-poster.jpg/",
+                    "tvshow.poster": "image://https%3a%2f%2fimage.example.com%2ftvshow-poster.jpg/",
+                },
+            },
+            f"{IMAGE_URL}https%253a%252f%252fimage.example.com%252fseason-poster.jpg%2F",
+            id="episode_season_poster",
+        ),
+        pytest.param(
+            {
+                "label": "Episode",
+                "thumbnail": "",
+                "art": {
+                    "tvshow.poster": "image://https%3a%2f%2fimage.example.com%2ftvshow-poster.jpg/"
+                },
+            },
+            f"{IMAGE_URL}https%253a%252f%252fimage.example.com%252ftvshow-poster.jpg%2F",
+            id="episode_tvshow_poster",
+        ),
+        pytest.param(
+            {
+                "label": "Item",
+                "thumbnail": "https://image.example.com/programme.webp",
+                "art": {
+                    "poster": "image://https%3a%2f%2fimage.example.com%2fmovie-poster.jpg/",
+                    "thumb": "image://pvrchannel_tv@http%3a%2f%2fpvr.example.com%2fimagecache%2f80/",
+                },
+            },
+            f"{IMAGE_URL}https%253a%252f%252fimage.example.com%252fmovie-poster.jpg%2F",
+            id="poster_before_thumb",
+        ),
+        pytest.param(
+            {
+                "label": "Item",
+                "thumbnail": "https://image.example.com/programme.webp",
+                "art": {
+                    "thumb": "image://pvrchannel_tv@http%3a%2f%2fpvr.example.com%2fimagecache%2f80/",
+                    "season.poster": "image://https%3a%2f%2fimage.example.com%2fseason-poster.jpg/",
+                },
+            },
+            f"{IMAGE_URL}pvrchannel_tv%40http%253a%252f%252fpvr.example.com%252fimagecache%252f80%2F",
+            id="thumb_before_season_poster",
+        ),
+    ],
+)
 async def test_entity_picture(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_kodi: MagicMock,
     freezer: FrozenDateTimeFactory,
+    item: dict[str, Any],
+    url: str,
 ) -> None:
-    """Test the thumbnail of the playing item is exposed as entity picture."""
-    await set_playing(
-        hass, mock_kodi, {"label": "Movie", "thumbnail": "image://movie.jpg/"}
-    )
+    """Test the entity picture is the thumbnail, or the art Kodi has instead."""
+    await set_playing(hass, mock_kodi, item)
     await setup_integration(hass, mock_config_entry)
 
     await advance_time(hass, freezer, SCAN_INTERVAL)
 
-    assert ATTR_ENTITY_PICTURE in hass.states.get(ENTITY_ID).attributes
-    mock_kodi.thumbnail_url.assert_called_with("image://movie.jpg/")
+    picture = hass.states.get(ENTITY_ID).attributes[ATTR_ENTITY_PICTURE]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+    assert picture.endswith(f"&cache={url_hash}")
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "item",
+    [
+        pytest.param({"label": "Movie", "thumbnail": "", "art": {}}, id="no_art"),
+        pytest.param(
+            {
+                "label": "Movie",
+                "thumbnail": "",
+                "art": {
+                    "fanart": "image://https%3a%2f%2fimage.example.com%2ffanart.jpg/"
+                },
+            },
+            id="only_fanart",
+        ),
+        pytest.param(
+            {
+                "label": "Item",
+                "thumbnail": "https://image.example.com/programme.webp",
+                "art": {},
+            },
+            id="web_thumbnail",
+        ),
+    ],
+)
+async def test_no_entity_picture(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    item: dict[str, Any],
+) -> None:
+    """Test an item without a usable image has no entity picture."""
+    await set_playing(hass, mock_kodi, item)
+    await setup_integration(hass, mock_config_entry)
+
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    assert ATTR_ENTITY_PICTURE not in hass.states.get(ENTITY_ID).attributes
 
 
 @pytest.mark.usefixtures("mock_connection")

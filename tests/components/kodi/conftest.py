@@ -165,5 +165,10 @@ def mock_kodi(
         )
         kodi.get_application_properties.side_effect = get_application_properties
         kodi.get_players.return_value = []
-        kodi.thumbnail_url.return_value = "http://1.1.1.1:8080/image/thumbnail"
+        # The image URLs are built from the entry data, like for the real client
+        kodi.thumbnail_url.side_effect = Kodi(
+            KodiHTTPConnection(
+                "1.1.1.1", 8080, "user", "pass", False, None, MagicMock()
+            )
+        ).thumbnail_url
         yield kodi

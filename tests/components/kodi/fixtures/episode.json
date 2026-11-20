@@ -1,5 +1,11 @@
 {
   "album": "",
+  "art": {
+    "icon": "image://DefaultVideo.png/",
+    "season.poster": "image://https%3a%2f%2fimage.example.com%2fseason-poster.jpg/",
+    "thumb": "image://https%3a%2f%2fimage.example.com%2fepisode.jpg/",
+    "tvshow.poster": "image://https%3a%2f%2fimage.example.com%2ftvshow-poster.jpg/"
+  },
   "artist": [],
   "episode": 7,
   "file": "/media/tv/Show title/s03/Show.title.S03E07.2160p.mkv",
