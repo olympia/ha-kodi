@@ -18,8 +18,7 @@
                 "data": {
                     "password": "\u5bc6\u78bc",
                     "username": "\u4f7f\u7528\u8005\u540d\u7a31"
-                },
-                "description": "\u8acb\u8f38\u5165 Kodi \u4f7f\u7528\u8005\u540d\u7a31\u8207\u5bc6\u78bc\uff0c\u53ef\u4ee5\u65bc\u300c\u7cfb\u7d71/\u8a2d\u5b9a/\u7db2\u8def/\u670d\u52d9\u300d\u4e2d\u627e\u5230\u3002"
+                }
             },
             "discovery_confirm": {
                 "description": "\u662f\u5426\u8981\u65b0\u589e Kodi (`{name}`) \u81f3 Home Assistant\uff1f",
@@ -30,7 +29,6 @@
                     "password": "\u5bc6\u78bc",
                     "username": "\u4f7f\u7528\u8005\u540d\u7a31"
                 },
-                "description": "\u4f4d\u65bc {host} \u7684 Kodi \u6191\u8b49\u5df2\u5931\u6548\u3002\u8acb\u8f38\u5165 Kodi \u4f7f\u7528\u8005\u540d\u7a31\u548c\u5bc6\u78bc\u3002\u53ef\u4ee5\u5728\u7cfb\u7d71/\u8a2d\u5b9a/\u7db2\u8def/\u670d\u52d9\u4e2d\u627e\u5230\u9019\u4e9b\u8cc7\u8a0a\u3002",
                 "title": "{name} \u8a8d\u8b49\u5df2\u904e\u671f"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "Kodi  \u4f3a\u670d\u5668\u4e3b\u6a5f\u7cfb\u7d71\u4e4b\u4e3b\u6a5f\u540d\u7a31\u6216 IP \u4f4d\u5740\u3002"
-                },
-                "description": "Kodi \u9023\u7dda\u8cc7\u8a0a\uff0c\u8acb\u78ba\u5b9a\u5df2\u65bc\u7cfb\u7d71/\u8a2d\u5b9a/\u7db2\u8def/\u670d\u52d9\u4e2d\u555f\u7528 \"\u5141\u8a31\u900f\u904e HTTP \u63a7\u5236 Kodi\"\u3002"
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "\u901a\u8a0a\u57e0"
-                },
-                "description": "WebSocket \u901a\u8a0a\u57e0\uff08Kodi \u6709\u6642\u5019\u7a31\u4e4b\u70ba TCP \u57e0\uff09\u3002\u6b32\u900f\u904e WebSocket \u9032\u884c\u9023\u7dda\uff0c\u5fc5\u9808\u5148\u65bc\u7cfb\u7d71/\u8a2d\u5b9a/\u7db2\u8def/\u670d\u52d9\u4e2d\u555f\u7528 \"\u5141\u8a31\u7a0b\u5f0f ... \u63a7\u5236 Kodi\"\u3002\u5047\u5982 WebSocket \u672a\u555f\u7528\uff0c\u8acb\u79fb\u9664\u901a\u8a0a\u57e0\u8f38\u5165\u3001\u4fdd\u6301\u7a7a\u767d\u3002"
+                }
             }
         }
     },

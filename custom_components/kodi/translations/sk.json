@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Heslo",
                     "username": "Pou\u017e\u00edvate\u013esk\u00e9 meno"
-                },
-                "description": "Zadajte svoje pou\u017e\u00edvate\u013esk\u00e9 meno a heslo Kodi. Tie n\u00e1jdete v Syst\u00e9m/Nastavenia/Sie\u0165/Slu\u017eby."
+                }
             },
             "discovery_confirm": {
                 "description": "Chcete prida\u0165 Kodi (`{name}`) do Home Assistant?",
@@ -30,7 +29,6 @@
                     "password": "Heslo",
                     "username": "Pou\u017e\u00edvate\u013esk\u00e9 meno"
                 },
-                "description": "Prihlasovacie \u00fadaje pre Kodi na adrese {host} u\u017e nie s\u00fa platn\u00e9. Zadajte svoje pou\u017e\u00edvate\u013esk\u00e9 meno a heslo Kodi. N\u00e1jdete ich v \u010dasti Syst\u00e9m/Nastavenia/Sie\u0165/Slu\u017eby.",
                 "title": "Vypr\u0161ala platnos\u0165 overenia pre {name}"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "N\u00e1zov hostite\u013ea alebo IP adresa syst\u00e9mu, ktor\u00fd je hostite\u013eom v\u00e1\u0161ho servera Kodi."
-                },
-                "description": "Inform\u00e1cie o pripojen\u00ed Kodi. Nezabudnite povoli\u0165 \"Povoli\u0165 ovl\u00e1danie Kodi cez HTTP\" v \u010dasti Syst\u00e9m/Nastavenia/Sie\u0165/Slu\u017eby."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Port"
-                },
-                "description": "Port WebSocket (niekedy naz\u00fdvan\u00fd TCP port v Kodi). Ak sa chcete pripoji\u0165 cez WebSocket, mus\u00edte povoli\u0165 \"Povoli\u0165 programom ... ovl\u00e1da\u0165 Kodi\" v \u010dasti Syst\u00e9m/Nastavenia/Sie\u0165/Slu\u017eby. Ak WebSocket nie je povolen\u00fd, odstr\u00e1\u0148te port a nechajte ho pr\u00e1zdny."
+                }
             }
         }
     },

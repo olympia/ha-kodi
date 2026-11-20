@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Passwort",
                     "username": "Benutzername"
-                },
-                "description": "Bitte gib deinen Kodi-Benutzernamen und Passwort ein. Diese findest du unter System/Einstellungen/Netzwerk/Dienste."
+                }
             },
             "discovery_confirm": {
                 "description": "M\u00f6chtest du Kodi (`{name}`) zu Home Assistant hinzuf\u00fcgen?",
@@ -30,7 +29,6 @@
                     "password": "Passwort",
                     "username": "Benutzername"
                 },
-                "description": "Die Anmeldedaten f\u00fcr Kodi unter {host} sind nicht mehr g\u00fcltig. Bitte gib deinen Kodi-Benutzernamen und dein Passwort ein. Diese findest du unter System > Einstellungen > Netzwerk > Dienste.",
                 "title": "Authentifizierung f\u00fcr {name} abgelaufen"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "Der Hostname oder die IP-Adresse des Systems, das deinen Kodi-Server hostet."
-                },
-                "description": "Kodi-Verbindungsinformationen. Bitte stelle sicher, dass du \u201eSteuerung von Kodi \u00fcber HTTP zulassen\u201c in System/Einstellungen/Netzwerk/Dienste aktiviert hast."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Port"
-                },
-                "description": "Der WebSocket-Port (in Kodi manchmal TCP-Port genannt). Um eine Verbindung \u00fcber WebSocket herzustellen, musst du unter System/Einstellungen/Netzwerk/Dienste \u201eProgramme \u2026 zur Steuerung von Kodi zulassen\u201c aktivieren. Wenn WebSocket nicht aktiviert ist, entferne den Port und lasse ihn leer."
+                }
             }
         }
     },

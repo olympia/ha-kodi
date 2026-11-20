@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Kata Sandi",
                     "username": "Nama Pengguna"
-                },
-                "description": "Masukkan nama pengguna dan kata sandi Kodi Anda. Ini dapat ditemukan di dalam Sistem/Setelan/Jaringan/Layanan."
+                }
             },
             "discovery_confirm": {
                 "description": "Ingin menambahkan Kodi (`{name}`) to Home Assistant?",
@@ -33,14 +32,12 @@
                 },
                 "data_description": {
                     "host": "Nama host atau alamat IP host sistem server Kodi Anda."
-                },
-                "description": "Informasi koneksi Kodi. Pastikan untuk mengaktifkan \"Izinkan kontrol Kodi melalui HTTP\" di Sistem/Pengaturan/Jaringan/Layanan."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Port"
-                },
-                "description": "Port WebSocket (kadang-kadang disebut port TCP di Kodi). Untuk terhubung melalui WebSocket, Anda perlu mengaktifkan \"Izinkan program... untuk mengontrol Kodi\" dalam Sistem/Pengaturan/Jaringan/Layanan. Jika WebSocket tidak diaktifkan, hapus port dan biarkan kosong."
+                }
             }
         }
     },

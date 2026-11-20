@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Lozinka",
                     "username": "Korisni\u010dko ime"
-                },
-                "description": "Unesite va\u0161e Kodi korisni\u010dko ime i lozinku. Mo\u017eete ih prona\u0107i u Sistem/Pode\u0161avanja/Mre\u017ea/Usluge."
+                }
             },
             "discovery_confirm": {
                 "description": "\u017delite li da dodate Kodi (\u201e{name}\u201d) u Home Assistant?",
@@ -30,7 +29,6 @@
                     "password": "Lozinka",
                     "username": "Korisni\u010dko ime"
                 },
-                "description": "Kredencijali za Kodi na adresi {host} vi\u0161e nije va\u017ee\u0107i. Unesite svoje Kodi korisni\u010dko ime i lozinku. Oni se mogu prona\u0107i u Sistem/Pode\u0161avanja/Mre\u017ea/Usluge.",
                 "title": "Prijava je istekla za {name}"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "Ime hosta ili IP adresa sistema na kojem se nalazi va\u0161 Kodi server."
-                },
-                "description": "Informacije o Kodi povezivanju. Obavezno omogu\u0107ite opciju \u201eDozvoli kontrolu Kodi-ja putem HTTP-a\u201d u System/Settings/Network/Services."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Port"
-                },
-                "description": "WebSocket port (ponekad nazvan TCP port u Kodi-ju). Da biste se povezali putem WebSocket-a, potrebno je da omogu\u0107ite opciju \u201eDozvoli programima ... da kontroli\u0161u Kodi\u201d u System/Settings/Network/Services. Ako WebSocket nije omogu\u0107en, uklonite port i ostavite polje prazno."
+                }
             }
         }
     },

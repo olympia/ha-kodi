@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Contrasinal",
                     "username": "Nome de usuario"
-                },
-                "description": "Introduce o teu nome de usuario e contrasinal de Kodi. P\u00f3dense atopar en Sistema/Configuraci\u00f3n/Rede/Servizos."
+                }
             },
             "discovery_confirm": {
                 "description": "Queres engadir Kodi (`{name}`) a Home Assistant?",
@@ -30,7 +29,6 @@
                     "password": "Contrasinal",
                     "username": "Nome de usuario"
                 },
-                "description": "As credenciais de Kodi en {host} xa non son v\u00e1lidas. Introduce o teu nome de usuario e contrasinal de Kodi. P\u00f3dense atopar en Sistema/Configuraci\u00f3n/Rede/Servizos.",
                 "title": "A autenticaci\u00f3n caducou para {name}"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "O nome do host ou o enderezo IP do sistema que aloxa o teu servidor Kodi."
-                },
-                "description": "Informaci\u00f3n de conexi\u00f3n de Kodi. Aseg\u00farate de activar \"Permitir o control de Kodi mediante HTTP\" en Sistema/Configuraci\u00f3n/Rede/Servizos."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Porto"
-                },
-                "description": "Porto WebSocket (\u00e1s veces chamado porto TCP en Kodi). Para conectar por WebSocket, tes que activar \"Permitir que os programas ... controlen Kodi\" en Sistema/Configuraci\u00f3n/Rede/Servizos. Se WebSocket non est\u00e1 activado, quita o porto e d\u00e9ixao baleiro."
+                }
             }
         }
     },

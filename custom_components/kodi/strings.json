@@ -19,7 +19,11 @@
           "password": "[%key:common::config_flow::data::password%]",
           "username": "[%key:common::config_flow::data::username%]"
         },
-        "description": "Please enter your Kodi user name and password. These can be found in System/Settings/Network/Services."
+        "data_description": {
+          "password": "The password of the Kodi web server.",
+          "username": "The username of the Kodi web server. Kodi uses `kodi` by default."
+        },
+        "description": "Enter the username and password of the Kodi web server, as set under **Settings** > **Services** > **Control** in Kodi."
       },
       "discovery_confirm": {
         "description": "Do you want to add Kodi (`{name}`) to Home Assistant?",
@@ -30,7 +34,11 @@
           "password": "[%key:common::config_flow::data::password%]",
           "username": "[%key:common::config_flow::data::username%]"
         },
-        "description": "The credentials for Kodi at {host} are no longer valid. Please enter your Kodi user name and password. These can be found in System/Settings/Network/Services.",
+        "data_description": {
+          "password": "[%key:component::kodi::config::step::credentials::data_description::password%]",
+          "username": "[%key:component::kodi::config::step::credentials::data_description::username%]"
+        },
+        "description": "The credentials for Kodi at {host} are no longer valid. Enter the username and password of the Kodi web server, as set under **Settings** > **Services** > **Control** in Kodi.",
         "title": "[%key:common::config_flow::title::reauth%]"
       },
       "user": {
@@ -40,15 +48,20 @@
           "ssl": "[%key:common::config_flow::data::ssl%]"
         },
         "data_description": {
-          "host": "The hostname or IP address of the system hosting your Kodi server."
+          "host": "The hostname or IP address of the system hosting your Kodi server.",
+          "port": "The port of the Kodi web server, set in the same Kodi menu.",
+          "ssl": "Connect over HTTPS. Turn this on if you reach Kodi over HTTPS, like with **Enable SSL** on in Kodi or behind a reverse proxy with HTTPS."
         },
-        "description": "Kodi connection information. Please make sure to enable \"Allow control of Kodi via HTTP\" in System/Settings/Network/Services."
+        "description": "Enter the connection details of the Kodi web server. In Kodi, turn on **Allow remote control via HTTP** under **Settings** > **Services** > **Control**."
       },
       "ws_port": {
         "data": {
           "ws_port": "[%key:common::config_flow::data::port%]"
         },
-        "description": "The WebSocket port (sometimes called TCP port in Kodi). In order to connect over WebSocket, you need to enable \"Allow programs ... to control Kodi\" in System/Settings/Network/Services. If WebSocket is not enabled, remove the port and leave empty."
+        "data_description": {
+          "ws_port": "The JSON-RPC port of Kodi, 9090 by default. You can change it in `advancedsettings.xml`."
+        },
+        "description": "To connect over WebSocket, turn on **Allow remote control from applications on this system** under **Settings** > **Services** > **Control** in Kodi. If Home Assistant connects from another system, also turn on **Allow remote control from applications on other systems**. If Kodi does not show these settings, or you do not use WebSocket, leave the port empty."
       }
     }
   },

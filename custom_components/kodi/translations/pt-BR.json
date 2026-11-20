@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Senha",
                     "username": "Usu\u00e1rio"
-                },
-                "description": "Insira seu nome de usu\u00e1rio e senha do Kodi. Eles podem ser encontrados em Sistema/Configura\u00e7\u00f5es/Rede/Servi\u00e7os."
+                }
             },
             "discovery_confirm": {
                 "description": "Deseja adicionar Kodi (`{name}`) ao Home Assistant?",
@@ -30,7 +29,6 @@
                     "password": "Senha",
                     "username": "Usu\u00e1rio"
                 },
-                "description": "As credenciais do Kodi em {host} n\u00e3o s\u00e3o mais v\u00e1lidas. Insira seu nome de usu\u00e1rio e senha do Kodi. Eles podem ser encontrados em Sistema/Configura\u00e7\u00f5es/Rede/Servi\u00e7os.",
                 "title": "Autentica\u00e7\u00e3o expirada para {name}"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "O nome de host ou endere\u00e7o IP do sistema que hospeda o seu servidor Kodi."
-                },
-                "description": "Informa\u00e7\u00f5es de conex\u00e3o do Kodi. Certifique-se de habilitar \"Allow control of Kodi via HTTP\" em Sistema/Configura\u00e7\u00f5es/Rede/Servi\u00e7os."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Porta"
-                },
-                "description": "A porta WebSocket (\u00e0s vezes chamada de porta TCP no Kodi). Para se conectar pelo WebSocket, voc\u00ea precisa habilitar \"Allow programs ... to control Kodi\" em Sistema/Configura\u00e7\u00f5es/Rede/Servi\u00e7os. Se o WebSocket n\u00e3o estiver habilitado, remova a porta e deixe em branco."
+                }
             }
         }
     },

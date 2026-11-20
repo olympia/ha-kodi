@@ -18,8 +18,7 @@
                 "data": {
                     "password": "L\u00f6senord",
                     "username": "Anv\u00e4ndarnamn"
-                },
-                "description": "V\u00e4nligen ange ditt Kodi-anv\u00e4ndarnamn och l\u00f6senord. Dessa finns i System/Inst\u00e4llningar/N\u00e4tverk/Tj\u00e4nster."
+                }
             },
             "discovery_confirm": {
                 "description": "Vill du l\u00e4gga till Kodi (`{name}`) till Home Assistant?",
@@ -30,7 +29,6 @@
                     "password": "L\u00f6senord",
                     "username": "Anv\u00e4ndarnamn"
                 },
-                "description": "Autentiseringsuppgifterna f\u00f6r Kodi p\u00e5 {host} \u00e4r inte l\u00e4ngre giltiga. Ange Kodi-anv\u00e4ndarnamnet och l\u00f6senordet. De finns under System/Inst\u00e4llningar/N\u00e4tverk/Tj\u00e4nster.",
                 "title": "Autentiseringen har upph\u00f6rt f\u00f6r {name}"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "V\u00e4rdnamnet eller IP-adressen f\u00f6r det system som \u00e4r v\u00e4rd f\u00f6r Kodi-servern."
-                },
-                "description": "Kodi anslutningsinformation. Se till att aktivera \"Till\u00e5t kontroll av Kodi via HTTP\" i System/Inst\u00e4llningar/N\u00e4tverk/Tj\u00e4nster."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Port"
-                },
-                "description": "WebSocket-porten (kallas ibland TCP-port i Kodi). F\u00f6r att ansluta \u00f6ver WebSocket m\u00e5ste du aktivera \u201dTill\u00e5t program \u2026 att styra Kodi\u201d i System/Inst\u00e4llningar/N\u00e4tverk/Tj\u00e4nster. Om WebSocket inte \u00e4r aktiverat, ta bort porten och l\u00e4mna tom."
+                }
             }
         }
     },

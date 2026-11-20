@@ -9,7 +9,7 @@ rules:
   config-flow-test-coverage: done
   config-flow:
     status: todo
-    comment: Only the host field has a data_description, and the notify platform can only be set up in YAML.
+    comment: The notify platform can only be set up in YAML.
   dependency-transparency: done
   docs-actions: done
   docs-conditions:

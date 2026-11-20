@@ -18,8 +18,7 @@
                 "data": {
                     "password": "Slapta\u017eodis",
                     "username": "Naudotojo vardas"
-                },
-                "description": "\u012eveskite savo Kodi naudotojo vard\u0105 ir slapta\u017eod\u012f. Juos galite rasti Sistema/Nustatymai/Tinklas/Paslaugos."
+                }
             },
             "discovery_confirm": {
                 "description": "Ar norite prid\u0117ti Kodi (\u201e{name}\u201c) prie \u201eHome Assistant\u201c?",
@@ -30,7 +29,6 @@
                     "password": "Slapta\u017eodis",
                     "username": "Naudotojo vardas"
                 },
-                "description": "Kodi \u012fgaliojimai {host} nebegalioja. \u012eveskite savo Kodi vartotojo vard\u0105 ir slapta\u017eod\u012f. Juos galite rasti sistemoje / nustatymuose / tinkle / paslaugose.",
                 "title": "Baig\u0117si {name} autentifikavimo galiojimas"
             },
             "user": {
@@ -41,14 +39,12 @@
                 },
                 "data_description": {
                     "host": "Sistemos, kurioje yra j\u016bs\u0173 Kodi serveris, pagrindinio kompiuterio pavadinimas arba IP adresas."
-                },
-                "description": "Kodi ry\u0161io informacija. \u012esitikinkite, kad Sistema / Nustatymai / Tinklas / Paslaugos \u012fgalino \u201eLeisti valdyti Kodi per HTTP\u201c."
+                }
             },
             "ws_port": {
                 "data": {
                     "ws_port": "Prievadas"
-                },
-                "description": "\u201eWebSocket\u201c prievadas (kartais \u201eKodi\u201c vadinamas TCP prievadu). Nor\u0117dami prisijungti per \u201eWebSocket\u201c, skiltyje Sistema / Nustatymai / Tinklas / Paslaugos turite \u012fjungti \u201eLeisti programoms ... valdyti Kodi\u201c. Jei WebSocket ne\u012fjungtas, pa\u0161alinkite prievad\u0105 ir palikite tu\u0161\u010di\u0105."
+                }
             }
         }
     },
