@@ -42,6 +42,7 @@ from homeassistant.components.media_player import (
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_ENTITY_PICTURE,
+    CONF_NAME,
     EVENT_HOMEASSISTANT_STARTED,
     EVENT_HOMEASSISTANT_STOP,
     STATE_UNAVAILABLE,
@@ -129,6 +130,42 @@ async def test_entity_and_device(
         device_registry, mock_config_entry.entry_id
     )
     assert devices == snapshot(name="devices")
+
+
+@pytest.mark.usefixtures("mock_connection", "mock_kodi")
+@pytest.mark.parametrize(
+    ("name", "title", "expected_name"),
+    [
+        pytest.param(None, "1.1.1.1", "1.1.1.1", id="added_by_hand"),
+        pytest.param(None, "Living room", "Living room", id="renamed_entry"),
+        pytest.param("cinema", "Living room", "cinema", id="discovered"),
+        pytest.param("", "Living room", "Living room", id="empty_imported_name"),
+    ],
+)
+async def test_device_name_after_reload(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+    mock_config_entry: MockConfigEntry,
+    name: str | None,
+    title: str,
+    expected_name: str,
+) -> None:
+    """Test the device keeps its name, or the entry title without one, after a reload."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=title,
+        data={**mock_config_entry.data, CONF_NAME: name},
+    )
+    await setup_integration(hass, entry)
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    (device,) = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
+    assert device.name == expected_name
+    (entity,) = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    assert hass.states.get(entity.entity_id).name == expected_name
 
 
 @pytest.mark.usefixtures("mock_connection")

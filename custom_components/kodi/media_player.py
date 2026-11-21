@@ -91,7 +91,8 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Kodi media player platform."""
-    name = config_entry.data[CONF_NAME]
+    # A Kodi added by hand has no name, and None clears the name of its device
+    name = config_entry.data[CONF_NAME] or config_entry.title
     if (uid := config_entry.unique_id) is None:
         uid = config_entry.entry_id
 
