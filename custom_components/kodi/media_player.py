@@ -20,7 +20,7 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.const import ATTR_ENTITY_ID, CONF_DEVICE_ID, CONF_NAME, CONF_TYPE
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -33,7 +33,7 @@ from .browse_media import (
     library_payload,
     media_source_content_filter,
 )
-from .connection import KodiConfigEntry
+from .connection import KodiConfigEntry, _error_text
 from .const import DOMAIN, EVENT_TURN_OFF, EVENT_TURN_ON
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ async def async_setup_entry(
 def cmd[_KodiEntityT: KodiEntity, **_P](
     func: Callable[Concatenate[_KodiEntityT, _P], Awaitable[Any]],
 ) -> Callable[Concatenate[_KodiEntityT, _P], Coroutine[Any, Any, None]]:
-    """Catch command exceptions."""
+    """Raise a translated error when Kodi fails a command."""
 
     @wraps(func)
     async def wrapper(obj: _KodiEntityT, *args: _P.args, **kwargs: _P.kwargs) -> None:
@@ -111,17 +111,26 @@ def cmd[_KodiEntityT: KodiEntity, **_P](
         try:
             await func(obj, *args, **kwargs)
         except (TransportError, ProtocolError) as exc:
-            # If Kodi is off, we expect calls to fail.
+            # A TransportError prints its arguments, and they can hold the request
+            # with its login, so the error is not chained
             if obj.state == MediaPlayerState.OFF:
-                log_function = _LOGGER.debug
-            else:
-                log_function = _LOGGER.error
-            log_function(
-                "Error calling %s on entity %s: %r",
-                func.__name__,
-                obj.entity_id,
-                exc,
-            )
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="kodi_off",
+                    translation_placeholders={
+                        "name": obj.device_name,
+                        "func": func.__name__,
+                    },
+                ) from None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="communication_error",
+                translation_placeholders={
+                    "name": obj.device_name,
+                    "func": func.__name__,
+                    "error": _error_text(exc),
+                },
+            ) from None
 
     return wrapper
 
@@ -155,6 +164,7 @@ class KodiEntity(MediaPlayerEntity):
         self._connection = manager.connection
         self._kodi = manager.kodi
         self._attr_unique_id = uid
+        self._name = name
         self._device_id = None
         self._state_generation = 0
         self._players = None
@@ -169,6 +179,13 @@ class KodiEntity(MediaPlayerEntity):
             manufacturer="Kodi",
             name=name,
         )
+
+    @property
+    def device_name(self) -> str:
+        """Return the name of the device as the user sees it."""
+        if (device := self.device_entry) is None:
+            return self._name
+        return device.name_by_user or self._name
 
     def _reset_state(self, players=None):
         self._state_generation += 1
@@ -281,9 +298,16 @@ class KodiEntity(MediaPlayerEntity):
 
         self.async_schedule_update_ha_state(True)
 
-    @cmd
     async def async_update(self) -> None:
         """Retrieve latest state."""
+        try:
+            await self._async_refresh()
+        except (TransportError, ProtocolError) as error:
+            # Kodi becoming unavailable is logged once, by the watchdog or the poll
+            _LOGGER.debug("Error refreshing %s: %s", self.entity_id, _error_text(error))
+
+    async def _async_refresh(self) -> None:
+        """Retrieve the state of Kodi and of the playing item."""
         if not self._connection.connected:
             self._reset_state()
             return
@@ -300,7 +324,6 @@ class KodiEntity(MediaPlayerEntity):
                 self._manager.async_log_unavailable(error)
                 self._manager.async_check_credentials()
                 self._reset_state()
-                return
             raise
 
         if generation != self._state_generation:

@@ -89,11 +89,17 @@
         "artist_not_found": {
             "message": "No artist matching {artist_name} was found in the Kodi music library."
         },
+        "communication_error": {
+            "message": "Error calling {func} on {name}: {error}"
+        },
         "invalid_media_id": {
             "message": "Media ID {media_id} is not a number."
         },
         "invalid_media_type": {
             "message": "Media type {media_type} is not supported. Use `SONG` or `ALBUM`."
+        },
+        "kodi_off": {
+            "message": "{name} is off and cannot run {func}."
         },
         "login_failed": {
             "message": "Login to {host} failed"

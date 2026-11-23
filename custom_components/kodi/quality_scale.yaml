@@ -28,7 +28,7 @@ rules:
   # Silver
   action-exceptions:
     status: todo
-    comment: Failed entity commands and kodi.call_method are logged instead of raised, kodi.add_to_playlist lets library errors through, the notify service lets ProtocolError through, and invalid input of play_media or shuffle without a player raises ValueError or RuntimeError instead of ServiceValidationError.
+    comment: A failed kodi.call_method is logged instead of raised, kodi.add_to_playlist lets library errors through, the notify service lets ProtocolError through, and invalid input of play_media or shuffle without a player raises ValueError or RuntimeError instead of ServiceValidationError.
   config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt

@@ -8,9 +8,10 @@ import logging
 from typing import Any
 from unittest.mock import MagicMock, call
 
-from aiohttp import ClientConnectionError
+from aiohttp import ClientConnectionError, ContentTypeError, RequestInfo
 from freezegun.api import FrozenDateTimeFactory
 from jsonrpc_base.jsonrpc import ProtocolError, TransportError
+from multidict import CIMultiDict, CIMultiDictProxy
 from pykodi import CannotConnectError
 import pytest
 from pytest_homeassistant.common import (
@@ -22,6 +23,7 @@ from pytest_homeassistant.common import (
 )
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
+from yarl import URL
 
 from custom_components.kodi.const import DOMAIN
 from homeassistant.components.media_player import (
@@ -48,7 +50,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
 )
 from homeassistant.core import CoreState, HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
@@ -2049,3 +2051,495 @@ async def test_add_to_playlist_library_error(
 
     assert exc_info.value is error
     assert playlist_writes(mock_kodi) == []
+
+
+def command(service: str, data: dict[str, Any], method: str, func: str) -> Any:
+    """Return a media player action and the Kodi request it sends."""
+    return pytest.param(service, data, method, func, id=service)
+
+
+COMMANDS = [
+    command("volume_up", {}, "volume_up", "async_volume_up"),
+    command("volume_down", {}, "volume_down", "async_volume_down"),
+    command(
+        "volume_set",
+        {"volume_level": 0.5},
+        "set_volume_level",
+        "async_set_volume_level",
+    ),
+    command("volume_mute", {"is_volume_muted": True}, "mute", "async_mute_volume"),
+    command("media_play_pause", {}, "play_pause", "async_media_play_pause"),
+    command("media_play", {}, "play", "async_media_play"),
+    command("media_pause", {}, "pause", "async_media_pause"),
+    command("media_stop", {}, "stop", "async_media_stop"),
+    command("media_next_track", {}, "next_track", "async_media_next_track"),
+    command("media_previous_track", {}, "previous_track", "async_media_previous_track"),
+    command("media_seek", {"seek_position": 10}, "media_seek", "async_media_seek"),
+    command(
+        "play_media",
+        {"media_content_type": "channel", "media_content_id": "5"},
+        "play_channel",
+        "async_play_media",
+    ),
+]
+
+
+async def media_player_action(
+    hass: HomeAssistant, service: str, data: dict[str, Any]
+) -> None:
+    """Call a media player action on the Kodi media player."""
+    await hass.services.async_call(
+        "media_player",
+        service,
+        {ATTR_ENTITY_ID: ENTITY_ID, **data},
+        blocking=True,
+    )
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("service", "data", "method", "func"),
+    [
+        *COMMANDS,
+        command("shuffle_set", {"shuffle": True}, "set_shuffle", "async_set_shuffle"),
+    ],
+)
+async def test_command_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    service: str,
+    data: dict[str, Any],
+    method: str,
+    func: str,
+) -> None:
+    """Test a command Kodi fails raises a translated error."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    getattr(mock_kodi, method).side_effect = TransportError("Connection lost")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, service, data)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": func,
+        "error": "Connection lost",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("error", "text"),
+    [
+        pytest.param(
+            TransportError("Transport Error", None, ClientConnectionError("Reset")),
+            "Reset",
+            id="connection_error",
+        ),
+        pytest.param(
+            ProtocolError(-32100, "Failed to execute method.", {"error": {}}),
+            "Failed to execute method. (-32100)",
+            id="kodi_error",
+        ),
+    ],
+)
+async def test_command_error_text(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    error: Exception,
+    text: str,
+) -> None:
+    """Test the error of a command tells why Kodi failed it."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    mock_kodi.play_pause.side_effect = error
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, "media_play_pause", {})
+
+    assert exc_info.value.translation_placeholders["error"] == text
+    assert exc_info.value.__suppress_context__
+
+
+async def make_kodi_idle(
+    hass: HomeAssistant, mock_kodi: MagicMock, freezer: FrozenDateTimeFactory
+) -> None:
+    """Let a poll find Kodi with nothing playing."""
+    set_idle(mock_kodi)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    assert hass.states.get(ENTITY_ID).state == MediaPlayerState.IDLE
+
+
+async def turn_off_by_failed_poll(
+    hass: HomeAssistant, mock_kodi: MagicMock, freezer: FrozenDateTimeFactory
+) -> None:
+    """Let a poll fail like it does when Kodi stops answering over HTTP."""
+    get_players = mock_kodi.get_players.side_effect
+    mock_kodi.get_players.side_effect = TransportError("Connection lost")
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    mock_kodi.get_players.side_effect = get_players
+    assert hass.states.get(ENTITY_ID).state == MediaPlayerState.OFF
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(("service", "data", "method", "func"), COMMANDS)
+async def test_command_while_kodi_is_off(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    service: str,
+    data: dict[str, Any],
+    method: str,
+    func: str,
+) -> None:
+    """Test a command Kodi fails while it is off says that Kodi is off."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+    error = TransportError("Connection lost")
+    getattr(mock_kodi, method).side_effect = error
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, service, data)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "kodi_off"
+    assert exc_info.value.translation_placeholders == {"name": "name", "func": func}
+    assert exc_info.value.__suppress_context__
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(("service", "data", "method", "func"), COMMANDS)
+async def test_command_succeeds_while_kodi_is_off(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    service: str,
+    data: dict[str, Any],
+    method: str,
+    func: str,
+) -> None:
+    """Test a command Kodi runs while the state is still off succeeds."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+
+    await media_player_action(hass, service, data)
+
+    getattr(mock_kodi, method).assert_awaited_once()
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("make_state", "translation_key"),
+    [
+        (make_kodi_idle, "communication_error"),
+        (turn_off_by_failed_poll, "kodi_off"),
+    ],
+)
+async def test_command_error_names_the_renamed_device(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    make_state: Callable[
+        [HomeAssistant, MagicMock, FrozenDateTimeFactory], Awaitable[None]
+    ],
+    translation_key: str,
+) -> None:
+    """Test the error of a command uses the name the user gave the device."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await make_state(hass, mock_kodi, freezer)
+    (device,) = dr.async_entries_for_config_entry(
+        device_registry, mock_config_entry.entry_id
+    )
+    device_registry.async_update_device(device.id, name_by_user="Living room")
+    mock_kodi.volume_up.side_effect = TransportError("Connection lost")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, "volume_up", {})
+
+    assert exc_info.value.translation_key == translation_key
+    assert exc_info.value.translation_placeholders["name"] == "Living room"
+
+
+def refresh_error_records(
+    caplog: pytest.LogCaptureFixture,
+) -> list[logging.LogRecord]:
+    """Return the log records of failed refreshes."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == "custom_components.kodi.media_player"
+        and record.getMessage().startswith("Error refreshing media_player.name")
+    ]
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (TransportError("No reply"), "No reply"),
+        (
+            TransportError("Transport Error", None, ClientConnectionError("Refused")),
+            "Refused",
+        ),
+        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+    ],
+)
+async def test_polled_refresh_error_is_a_debug_message(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    reason: str,
+) -> None:
+    """Test a poll Kodi fails halfway is only a debug message."""
+    caplog.set_level(logging.DEBUG)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_application_properties.side_effect = error
+
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    assert [
+        (record.levelno, record.getMessage())
+        for record in refresh_error_records(caplog)
+    ] == [(logging.DEBUG, f"Error refreshing {ENTITY_ID}: {reason}")]
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@websocket
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (TransportError("No reply"), "No reply"),
+        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+    ],
+)
+async def test_websocket_refresh_error_is_a_debug_message(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_connection: MagicMock,
+    mock_kodi: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    reason: str,
+) -> None:
+    """Test a refresh Kodi fails leaves the logging to the watchdog."""
+    caplog.set_level(logging.DEBUG)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    assert hass.states.get(ENTITY_ID).state == MediaPlayerState.PLAYING
+    mock_kodi.get_playing_item_properties.side_effect = error
+
+    mock_connection.server.Player.OnPause("xbmc", player_notification(0))
+    await hass.async_block_till_done()
+
+    assert [
+        (record.levelno, record.getMessage())
+        for record in refresh_error_records(caplog)
+    ] == [(logging.DEBUG, f"Error refreshing {ENTITY_ID}: {reason}")]
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_failed_poll_is_a_debug_message(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a poll Kodi does not answer is logged at debug next to the info."""
+    caplog.set_level(logging.DEBUG)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+
+    assert [
+        (record.levelno, record.getMessage())
+        for record in refresh_error_records(caplog)
+    ] == [(logging.DEBUG, f"Error refreshing {ENTITY_ID}: Connection lost")]
+    assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
+
+
+def login_page_error() -> TransportError:
+    """Return the error of a login page a proxy sends with 200 OK.
+
+    It is wrapped like jsonrpc-async does, with the login in the request.
+    """
+    url = URL("http://1.1.1.1:8080/jsonrpc")
+    request_info = RequestInfo(
+        url,
+        "POST",
+        CIMultiDictProxy(CIMultiDict({"Authorization": "Basic dXNlcjpwYXNz"})),
+        url,
+    )
+    return TransportError(
+        "Cannot deserialize response body",
+        None,
+        ContentTypeError(
+            request_info,
+            (),
+            status=200,
+            message="Attempt to decode JSON with unexpected mimetype: text/html",
+        ),
+    )
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_refresh_error_keeps_the_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test the log of a failed refresh leaves out the login sent to Kodi."""
+    caplog.set_level(logging.DEBUG)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.get_players.side_effect = login_page_error()
+
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    assert [record.getMessage() for record in refresh_error_records(caplog)] == [
+        f"Error refreshing {ENTITY_ID}: 200, message='Attempt to decode JSON with "
+        "unexpected mimetype: text/html', url='http://1.1.1.1:8080/jsonrpc'"
+    ]
+    assert "dXNlcjpwYXNz" not in caplog.text
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("make_state", "message"),
+    [
+        (
+            make_kodi_idle,
+            "Error calling async_volume_up on name: 200, message='Attempt to decode "
+            "JSON with unexpected mimetype: text/html', "
+            "url='http://1.1.1.1:8080/jsonrpc'",
+        ),
+        (turn_off_by_failed_poll, "name is off and cannot run async_volume_up"),
+    ],
+)
+async def test_background_command_error_keeps_the_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    make_state: Callable[
+        [HomeAssistant, MagicMock, FrozenDateTimeFactory], Awaitable[None]
+    ],
+    message: str,
+) -> None:
+    """Test the logged error of a command run in the background leaves out the login."""
+    caplog.set_level(logging.DEBUG)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await make_state(hass, mock_kodi, freezer)
+    mock_kodi.volume_up.side_effect = login_page_error()
+
+    await hass.services.async_call(
+        "media_player", "volume_up", {ATTR_ENTITY_ID: ENTITY_ID}
+    )
+    await hass.async_block_till_done()
+
+    assert [
+        str(record.exc_info[1])
+        for record in caplog.records
+        if record.name == "homeassistant.core" and record.exc_info
+    ] == [message]
+    assert "dXNlcjpwYXNz" not in caplog.text
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "error",
+    [TransportError("Connection lost"), ProtocolError(-32100, "Failed", {})],
+)
+async def test_command_error_while_idle(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    error: Exception,
+) -> None:
+    """Test a command Kodi fails while nothing plays is not reported as off."""
+    set_idle(mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    assert hass.states.get(ENTITY_ID).state == MediaPlayerState.IDLE
+    mock_kodi.volume_up.side_effect = error
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, "volume_up", {})
+
+    assert exc_info.value.translation_key == "communication_error"
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_kodi_error_response_while_kodi_is_off(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test an error response of a Kodi that answers again while off says off."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+    mock_kodi.volume_up.side_effect = ProtocolError(-32100, "Failed", {})
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await media_player_action(hass, "volume_up", {})
+
+    assert exc_info.value.translation_key == "kodi_off"
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("service", "data", "error_type"),
+    [
+        pytest.param("shuffle_set", {"shuffle": True}, RuntimeError, id="no_player"),
+        pytest.param(
+            "play_media",
+            {"media_content_type": "channel", "media_content_id": "five"},
+            ValueError,
+            id="channel_not_a_number",
+        ),
+    ],
+)
+async def test_command_input_error_is_not_a_kodi_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    service: str,
+    data: dict[str, Any],
+    error_type: type[Exception],
+) -> None:
+    """Test an error before any request to Kodi is not turned into a Kodi error."""
+    set_idle(mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+
+    with pytest.raises(error_type):
+        await media_player_action(hass, service, data)
