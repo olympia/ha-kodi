@@ -110,6 +110,9 @@
         "missing_media": {
             "message": "Enter a media ID or a media name to add a song."
         },
+        "no_active_player": {
+            "message": "Shuffle cannot be set while {name} is not playing anything."
+        },
         "no_albums": {
             "message": "Artist {artist_name} has no albums in the Kodi music library."
         },

@@ -629,9 +629,9 @@ class KodiEntity(MediaPlayerEntity):
         media_type_lower = media_type.lower()
 
         if media_type_lower == MediaType.CHANNEL:
-            await self._kodi.play_channel(int(media_id))
+            await self._kodi.play_channel(_media_id(media_id))
         elif media_type_lower == MediaType.PLAYLIST:
-            await self._kodi.play_playlist(int(media_id))
+            await self._kodi.play_playlist(_media_id(media_id))
         elif media_type_lower == "file":
             await self._kodi.play_file(media_id)
         elif media_type_lower == "directory":
@@ -641,8 +641,9 @@ class KodiEntity(MediaPlayerEntity):
             MediaType.ALBUM,
             MediaType.TRACK,
         ]:
+            library_id = _media_id(media_id)
             await self.async_clear_playlist()
-            await self.async_add_to_playlist(media_type_lower, media_id)
+            await self.async_add_to_playlist(media_type_lower, library_id)
             await self._kodi.play_playlist(0)
         elif media_type_lower in [
             MediaType.MOVIE,
@@ -651,7 +652,7 @@ class KodiEntity(MediaPlayerEntity):
             MediaType.TVSHOW,
         ]:
             await self._kodi.play_item(
-                {MAP_KODI_MEDIA_TYPES[media_type_lower]: int(media_id)}
+                {MAP_KODI_MEDIA_TYPES[media_type_lower]: _media_id(media_id)}
             )
         else:
             media_id = async_process_play_media_url(self.hass, media_id)
@@ -663,7 +664,7 @@ class KodiEntity(MediaPlayerEntity):
     async def async_set_shuffle(self, shuffle: bool) -> None:
         """Set shuffle mode, for the first player."""
         if self._no_active_players:
-            raise RuntimeError("Error: No active player.")
+            raise _validation_error("no_active_player", name=self.device_name)
         await self._kodi.set_shuffle(shuffle)
 
     async def async_call_method(self, method, **kwargs):

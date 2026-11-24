@@ -2514,32 +2514,138 @@ async def test_kodi_error_response_while_kodi_is_off(
     assert exc_info.value.translation_key == "kodi_off"
 
 
+PLAY_MEDIA_TYPES = [
+    "channel",
+    "playlist",
+    "movie",
+    "episode",
+    "season",
+    "tvshow",
+    "artist",
+    "album",
+    "track",
+]
+
+
 @pytest.mark.usefixtures("mock_connection")
 @pytest.mark.parametrize(
-    ("service", "data", "error_type"),
+    ("media_type", "kodi_calls"),
     [
-        pytest.param("shuffle_set", {"shuffle": True}, RuntimeError, id="no_player"),
-        pytest.param(
-            "play_media",
-            {"media_content_type": "channel", "media_content_id": "five"},
-            ValueError,
-            id="channel_not_a_number",
+        ("channel", [call.play_channel(5)]),
+        ("playlist", [call.play_playlist(5)]),
+        ("movie", [call.play_item({"movieid": 5})]),
+        ("episode", [call.play_item({"episodeid": 5})]),
+        ("season", [call.play_item({"seasonid": 5})]),
+        ("tvshow", [call.play_item({"tvshowid": 5})]),
+        (
+            "artist",
+            [
+                call.clear_playlist(),
+                call.add_artist_to_playlist(5),
+                call.play_playlist(0),
+            ],
+        ),
+        (
+            "album",
+            [
+                call.clear_playlist(),
+                call.add_album_to_playlist(5),
+                call.play_playlist(0),
+            ],
+        ),
+        (
+            "track",
+            [
+                call.clear_playlist(),
+                call.add_song_to_playlist(5),
+                call.play_playlist(0),
+            ],
         ),
     ],
 )
-async def test_command_input_error_is_not_a_kodi_error(
+async def test_play_media_by_library_id(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_kodi: MagicMock,
     freezer: FrozenDateTimeFactory,
-    service: str,
-    data: dict[str, Any],
-    error_type: type[Exception],
+    media_type: str,
+    kodi_calls: list[Any],
 ) -> None:
-    """Test an error before any request to Kodi is not turned into a Kodi error."""
+    """Test play_media sends the media ID to Kodi as a number."""
     set_idle(mock_kodi)
     await setup_integration(hass, mock_config_entry)
     await advance_time(hass, freezer, SCAN_INTERVAL)
+    mock_kodi.reset_mock()
 
-    with pytest.raises(error_type):
-        await media_player_action(hass, service, data)
+    await media_player_action(
+        hass, "play_media", {"media_content_type": media_type, "media_content_id": "5"}
+    )
+
+    action_calls = mock_kodi.method_calls[: len(kodi_calls)]
+    # The repr tells an ID of 5 from 5.0, which compare equal
+    assert repr(action_calls) == repr(kodi_calls)
+    # Home Assistant refreshes a polled entity after an action
+    assert {name for name, _, _ in mock_kodi.method_calls[len(kodi_calls) :]} == {
+        "get_players",
+        "thumbnail_url",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize("media_type", PLAY_MEDIA_TYPES)
+async def test_play_media_rejects_an_id_that_is_not_a_number(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    media_type: str,
+) -> None:
+    """Test play_media with a media ID that is not a number leaves Kodi alone."""
+    set_idle(mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    mock_kodi.reset_mock()
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await media_player_action(
+            hass,
+            "play_media",
+            {"media_content_type": media_type, "media_content_id": "five"},
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "invalid_media_id"
+    assert exc_info.value.translation_placeholders == {"media_id": "five"}
+    assert mock_kodi.method_calls == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("name_by_user", "name"), [(None, "name"), ("Living room", "Living room")]
+)
+async def test_shuffle_without_a_player(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    name_by_user: str | None,
+    name: str,
+) -> None:
+    """Test shuffle while Kodi plays nothing names the device and leaves Kodi alone."""
+    set_idle(mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await advance_time(hass, freezer, SCAN_INTERVAL)
+    (device,) = dr.async_entries_for_config_entry(
+        device_registry, mock_config_entry.entry_id
+    )
+    device_registry.async_update_device(device.id, name_by_user=name_by_user)
+    mock_kodi.reset_mock()
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await media_player_action(hass, "shuffle_set", {"shuffle": True})
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "no_active_player"
+    assert exc_info.value.translation_placeholders == {"name": name}
+    assert mock_kodi.method_calls == []
