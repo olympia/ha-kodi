@@ -107,6 +107,9 @@
     "login_failed": {
       "message": "Login to {host} failed"
     },
+    "media_not_found": {
+      "message": "Media not found: {media_content_type} / {media_content_id}"
+    },
     "missing_artist_name": {
       "message": "Enter an artist name to add all albums of an artist."
     },

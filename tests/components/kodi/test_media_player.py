@@ -20,12 +20,14 @@ from pytest_homeassistant.common import (
     async_load_json_object_fixture,
     snapshot_platform,
 )
+from pytest_homeassistant.typing import WebSocketGenerator
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
 
 from custom_components.kodi.const import DOMAIN
 from homeassistant.components.media_player import (
     ATTR_MEDIA_ALBUM_NAME,
+    ATTR_MEDIA_CONTENT_ID,
     ATTR_MEDIA_CONTENT_TYPE,
     ATTR_MEDIA_EPISODE,
     ATTR_MEDIA_POSITION,
@@ -36,6 +38,7 @@ from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
     ATTR_MEDIA_VOLUME_MUTED,
     SCAN_INTERVAL,
+    BrowseError,
     MediaPlayerState,
     MediaType,
 )
@@ -2768,3 +2771,212 @@ async def test_shuffle_without_a_player(
     assert exc_info.value.translation_key == "no_active_player"
     assert exc_info.value.translation_placeholders == {"name": name}
     assert mock_kodi.method_calls == []
+
+
+async def browse_media(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    media_content_type: str,
+    media_content_id: str = "",
+) -> dict[str, Any]:
+    """Browse the media of the Kodi media player over the websocket API."""
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "media_player/browse_media",
+            "entity_id": ENTITY_ID,
+            "media_content_type": media_content_type,
+            "media_content_id": media_content_id,
+        }
+    )
+    return await client.receive_json()
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (TransportError("No reply"), "No reply"),
+        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+    ],
+)
+async def test_browse_media_kodi_error(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    error: Exception,
+    reason: str,
+) -> None:
+    """Test a failed Kodi request while browsing gives a translated error."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.get_movies.side_effect = error
+
+    response = await browse_media(hass, hass_ws_client, MediaType.MOVIE)
+
+    assert not response["success"]
+    assert response["error"] == {
+        "code": "unknown_error",
+        "message": f"Error calling async_browse_media on name: {reason}",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_action_kodi_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test the media_player.browse_media action raises a translated error."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.get_movies.side_effect = TransportError("No reply")
+
+    with pytest.raises(BrowseError) as exc_info:
+        await hass.services.async_call(
+            "media_player",
+            "browse_media",
+            {ATTR_ENTITY_ID: ENTITY_ID, ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE},
+            blocking=True,
+            return_response=True,
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_browse_media",
+        "error": "No reply",
+    }
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_while_kodi_is_off(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a failed Kodi request while browsing tells that Kodi is off."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+    mock_kodi.get_movies.side_effect = TransportError("Connection lost")
+
+    response = await browse_media(hass, hass_ws_client, MediaType.MOVIE)
+
+    assert not response["success"]
+    assert response["error"] == {
+        "code": "unknown_error",
+        "message": "name is off and cannot run async_browse_media",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_error_keeps_the_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test the error of a failed browse request leaves the login out of the log."""
+    caplog.set_level(logging.DEBUG)
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.get_movies.side_effect = login_page_error()
+
+    response = await browse_media(hass, hass_ws_client, MediaType.MOVIE)
+
+    assert not response["success"]
+    assert "dXNlcjpwYXNz" not in response["error"]["message"]
+    assert "dXNlcjpwYXNz" not in caplog.text
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_not_found(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test browsing a content type Kodi media is not listed for."""
+    await setup_integration(hass, mock_config_entry)
+
+    response = await browse_media(hass, hass_ws_client, MediaType.PLAYLIST, "5")
+
+    assert not response["success"]
+    assert response["error"] == {
+        "code": "unknown_error",
+        "message": "Media not found: playlist / 5",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_action_not_found(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test the media_player.browse_media action raises a translated not found error."""
+    await setup_integration(hass, mock_config_entry)
+
+    with pytest.raises(BrowseError) as exc_info:
+        await hass.services.async_call(
+            "media_player",
+            "browse_media",
+            {
+                ATTR_ENTITY_ID: ENTITY_ID,
+                ATTR_MEDIA_CONTENT_TYPE: MediaType.PLAYLIST,
+                ATTR_MEDIA_CONTENT_ID: "5",
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "media_not_found"
+    assert exc_info.value.translation_placeholders == {
+        "media_content_type": "playlist",
+        "media_content_id": "5",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_action_lists_the_movies(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test the media_player.browse_media action returns the movies of Kodi."""
+    mock_kodi.get_movies.return_value = {
+        "movies": [{"movieid": 7, "label": "Example Movie"}]
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    response = await hass.services.async_call(
+        "media_player",
+        "browse_media",
+        {
+            ATTR_ENTITY_ID: ENTITY_ID,
+            ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE,
+            ATTR_MEDIA_CONTENT_ID: "",
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+    result = response[ENTITY_ID].as_dict()
+    assert result["title"] == "Movies"
+    assert result["media_content_type"] == MediaType.MOVIE
+    assert [
+        (child["title"], child["media_content_type"], child["media_content_id"])
+        for child in result["children"]
+    ] == [("Example Movie", MediaType.MOVIE, "7")]

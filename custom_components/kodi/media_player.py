@@ -100,6 +100,30 @@ async def async_setup_entry(
     async_add_entities([entity])
 
 
+def _kodi_error(
+    entity: KodiEntity,
+    func: str,
+    exc: Exception,
+    error_class: type[HomeAssistantError] = HomeAssistantError,
+) -> HomeAssistantError:
+    """Return the translated error of a failed Kodi request, to raise from None."""
+    if entity.state == MediaPlayerState.OFF:
+        return error_class(
+            translation_domain=DOMAIN,
+            translation_key="kodi_off",
+            translation_placeholders={"name": entity.device_name, "func": func},
+        )
+    return error_class(
+        translation_domain=DOMAIN,
+        translation_key="communication_error",
+        translation_placeholders={
+            "name": entity.device_name,
+            "func": func,
+            "error": _error_text(exc),
+        },
+    )
+
+
 def cmd[_KodiEntityT: KodiEntity, **_P](
     func: Callable[Concatenate[_KodiEntityT, _P], Awaitable[Any]],
 ) -> Callable[Concatenate[_KodiEntityT, _P], Coroutine[Any, Any, None]]:
@@ -113,24 +137,7 @@ def cmd[_KodiEntityT: KodiEntity, **_P](
         except (TransportError, ProtocolError) as exc:
             # A TransportError prints its arguments, and they can hold the request
             # with its login, so the error is not chained
-            if obj.state == MediaPlayerState.OFF:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="kodi_off",
-                    translation_placeholders={
-                        "name": obj.device_name,
-                        "func": func.__name__,
-                    },
-                ) from None
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="communication_error",
-                translation_placeholders={
-                    "name": obj.device_name,
-                    "func": func.__name__,
-                    "error": _error_text(exc),
-                },
-            ) from None
+            raise _kodi_error(obj, func.__name__, exc) from None
 
     return wrapper
 
@@ -852,10 +859,20 @@ class KodiEntity(MediaPlayerEntity):
             "search_id": media_content_id,
         }
 
-        response = await build_item_response(self._kodi, payload, _get_thumbnail_url)
+        try:
+            response = await build_item_response(
+                self._kodi, payload, _get_thumbnail_url
+            )
+        except (TransportError, ProtocolError) as exc:
+            raise _kodi_error(self, "async_browse_media", exc, BrowseError) from None
         if response is None:
             raise BrowseError(
-                f"Media not found: {media_content_type} / {media_content_id}"
+                translation_domain=DOMAIN,
+                translation_key="media_not_found",
+                translation_placeholders={
+                    "media_content_type": str(media_content_type),
+                    "media_content_id": str(media_content_id),
+                },
             )
         return response
 

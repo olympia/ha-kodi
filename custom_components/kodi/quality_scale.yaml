@@ -80,7 +80,7 @@ rules:
     comment: The media player uses the name of its device.
   exception-translations:
     status: todo
-    comment: The errors of media browsing, of invalid play_media input and of shuffle without a player are not translated.
+    comment: An invalid media ID given to media browsing raises an untranslated Python error.
   icon-translations:
     status: exempt
     comment: The media player has no icon of its own.
