@@ -1,12 +1,15 @@
 """Tests for the Kodi media player."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
 from datetime import timedelta
 import hashlib
+from http import HTTPStatus
 import logging
+import sys
 from typing import Any
 from unittest.mock import MagicMock, call
+from urllib.parse import urlsplit
 
 from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
@@ -20,7 +23,7 @@ from pytest_homeassistant.common import (
     async_load_json_object_fixture,
     snapshot_platform,
 )
-from pytest_homeassistant.typing import WebSocketGenerator
+from pytest_homeassistant.typing import ClientSessionGenerator, WebSocketGenerator
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
 
@@ -2920,10 +2923,15 @@ async def test_browse_media_not_found(
 
 
 @pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("data", "media_id"), [({ATTR_MEDIA_CONTENT_ID: "5"}, "5"), ({}, "")]
+)
 async def test_browse_media_action_not_found(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_kodi: MagicMock,
+    data: dict[str, str],
+    media_id: str,
 ) -> None:
     """Test the media_player.browse_media action raises a translated not found error."""
     await setup_integration(hass, mock_config_entry)
@@ -2935,7 +2943,7 @@ async def test_browse_media_action_not_found(
             {
                 ATTR_ENTITY_ID: ENTITY_ID,
                 ATTR_MEDIA_CONTENT_TYPE: MediaType.PLAYLIST,
-                ATTR_MEDIA_CONTENT_ID: "5",
+                **data,
             },
             blocking=True,
             return_response=True,
@@ -2945,7 +2953,7 @@ async def test_browse_media_action_not_found(
     assert exc_info.value.translation_key == "media_not_found"
     assert exc_info.value.translation_placeholders == {
         "media_content_type": "playlist",
-        "media_content_id": "5",
+        "media_content_id": media_id,
     }
 
 
@@ -2980,3 +2988,469 @@ async def test_browse_media_action_lists_the_movies(
         (child["title"], child["media_content_type"], child["media_content_id"])
         for child in result["children"]
     ] == [("Example Movie", MediaType.MOVIE, "7")]
+
+
+async def browse_media_action(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> dict[str, Any]:
+    """Browse the media of the Kodi media player with the media_player.browse_media action."""
+    response = await hass.services.async_call(
+        "media_player",
+        "browse_media",
+        {ATTR_ENTITY_ID: ENTITY_ID, **data},
+        blocking=True,
+        return_response=True,
+    )
+    return response[ENTITY_ID].as_dict()
+
+
+def browsed_children(result: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Return the title, type and ID of the children of a browse result."""
+    return [
+        (child["title"], child["media_content_type"], child["media_content_id"])
+        for child in result["children"]
+    ]
+
+
+@pytest.fixture
+def int_max_str_digits() -> Generator[None]:
+    """Set the integer string conversion length limit of Python to its default."""
+    limit = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(sys.int_info.default_max_str_digits)
+    yield
+    sys.set_int_max_str_digits(limit)
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_action_without_an_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test browsing a category without a media content ID lists the category."""
+    mock_kodi.get_movies.return_value = {
+        "movies": [
+            {"movieid": 7, "label": "Zebra Crossing"},
+            {"movieid": 8, "label": "Orchard"},
+            {"movieid": 9, "label": "The Apple Tree"},
+        ]
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE})
+
+    assert result["title"] == "Movies"
+    assert result["media_content_id"] == ""
+    assert result["thumbnail"] is None
+    assert browsed_children(result) == [
+        ("The Apple Tree", MediaType.MOVIE, "9"),
+        ("Orchard", MediaType.MOVIE, "8"),
+        ("Zebra Crossing", MediaType.MOVIE, "7"),
+    ]
+
+
+@pytest.mark.usefixtures("mock_connection", "int_max_str_digits")
+@pytest.mark.parametrize(
+    "media_type",
+    [MediaType.ALBUM, MediaType.ARTIST, MediaType.MOVIE, MediaType.TVSHOW],
+)
+@pytest.mark.parametrize(
+    "media_id",
+    ["abc", "0", "-1", "1_0", " 5", "+5", "\u0665", "9" * 4301, "0" * 4300 + "1"],
+)
+async def test_browse_media_rejects_an_invalid_library_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    media_type: str,
+    media_id: str,
+) -> None:
+    """Test browsing with an ID that is not a Kodi library ID asks Kodi for nothing."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.reset_mock()
+
+    with pytest.raises(BrowseError) as exc_info:
+        await browse_media_action(
+            hass, {ATTR_MEDIA_CONTENT_TYPE: media_type, ATTR_MEDIA_CONTENT_ID: media_id}
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "invalid_library_id"
+    assert exc_info.value.translation_placeholders == {"media_id": media_id}
+    assert mock_kodi.method_calls == []
+
+
+@pytest.mark.usefixtures("mock_connection", "int_max_str_digits")
+@pytest.mark.parametrize(
+    ("data", "media_id"),
+    [
+        ({}, ""),
+        ({ATTR_MEDIA_CONTENT_ID: "1"}, "1"),
+        ({ATTR_MEDIA_CONTENT_ID: "a/1"}, "a/1"),
+        ({ATTR_MEDIA_CONTENT_ID: "1/b"}, "1/b"),
+        ({ATTR_MEDIA_CONTENT_ID: "1/2/3"}, "1/2/3"),
+        ({ATTR_MEDIA_CONTENT_ID: "0/1"}, "0/1"),
+        ({ATTR_MEDIA_CONTENT_ID: "1/-1"}, "1/-1"),
+        ({ATTR_MEDIA_CONTENT_ID: "1_0/1"}, "1_0/1"),
+        ({ATTR_MEDIA_CONTENT_ID: "1/ 2"}, "1/ 2"),
+        ({ATTR_MEDIA_CONTENT_ID: "1/" + "9" * 4301}, "1/" + "9" * 4301),
+        ({ATTR_MEDIA_CONTENT_ID: "0" * 4300 + "1/1"}, "0" * 4300 + "1/1"),
+    ],
+)
+async def test_browse_media_rejects_an_invalid_season_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    data: dict[str, str],
+    media_id: str,
+) -> None:
+    """Test browsing a season with an ID not made of two numbers asks Kodi for nothing."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.reset_mock()
+
+    with pytest.raises(BrowseError) as exc_info:
+        await browse_media_action(
+            hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.SEASON, **data}
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "invalid_season_id"
+    assert exc_info.value.translation_placeholders == {"media_id": media_id}
+    assert mock_kodi.method_calls == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_season(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test browsing a season lists its episodes."""
+    mock_kodi.get_episodes.return_value = {
+        "episodes": [{"episodeid": 9, "label": "Pilot", "seasonid": 3, "tvshowid": 1}]
+    }
+    mock_kodi.get_season_details.return_value = {
+        "seasondetails": {"label": "Season 2", "art": {}}
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.SEASON, ATTR_MEDIA_CONTENT_ID: "1/2"}
+    )
+
+    assert result["title"] == "Season 2"
+    assert browsed_children(result) == [("Pilot", MediaType.EPISODE, "9")]
+    assert mock_kodi.get_episodes.call_args.kwargs["tv_show_id"] == 1
+    assert mock_kodi.get_episodes.call_args.kwargs["season_id"] == 2
+    assert mock_kodi.get_season_details.call_args.kwargs["season_id"] == 3
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("media_id", "title"), [("1/9", "Season 9"), ("0001/00", "Season 0")]
+)
+async def test_browse_media_empty_season(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    media_id: str,
+    title: str,
+) -> None:
+    """Test a season without episodes is an empty folder named after its number."""
+    mock_kodi.get_episodes.return_value = {
+        "limits": {"start": 0, "end": 0, "total": 0},
+        "episodes": [],
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass,
+        {ATTR_MEDIA_CONTENT_TYPE: MediaType.SEASON, ATTR_MEDIA_CONTENT_ID: media_id},
+    )
+
+    assert result["title"] == title
+    assert result["children"] == []
+    mock_kodi.get_season_details.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("media_type", "media_id", "method", "title"),
+    [
+        (MediaType.ALBUM, "", "get_albums", "Albums"),
+        (MediaType.ARTIST, "", "get_artists", "Artists"),
+        (MediaType.ARTIST, "4", "get_albums", "The Lanterns"),
+        (MediaType.ALBUM, "10", "get_songs", "First Light"),
+    ],
+)
+async def test_browse_media_empty_music_library(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    media_type: str,
+    media_id: str,
+    method: str,
+    title: str,
+) -> None:
+    """Test an empty music library result is an empty folder.
+
+    Kodi leaves the list out of the result when nothing in the music library
+    matches.
+    """
+    getattr(mock_kodi, method).return_value = {
+        "limits": {"start": 0, "end": 0, "total": 0}
+    }
+    mock_kodi.get_artist_details.return_value = {
+        "artistdetails": {"label": "The Lanterns", "art": {}}
+    }
+    mock_kodi.get_album_details.return_value = {
+        "albumdetails": {"label": "First Light", "art": {}}
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: media_type, ATTR_MEDIA_CONTENT_ID: media_id}
+    )
+
+    assert result["title"] == title
+    assert result["children"] == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_image_with_an_id_that_is_not_a_number(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test the image of a browsed item with an ID that is not a number is not found."""
+    await setup_integration(hass, mock_config_entry)
+    client = await hass_client()
+
+    response = await client.get(
+        f"/api/media_player_proxy/{ENTITY_ID}/browse_media/movie/abc"
+    )
+
+    assert response.status == HTTPStatus.NOT_FOUND
+    mock_kodi.get_movie_details.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "error", [ProtocolError("Unknown method"), TransportError("Connection lost")]
+)
+async def test_browse_image_when_kodi_fails(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    error: Exception,
+) -> None:
+    """Test the image of a browsed item is not found when Kodi fails."""
+    mock_kodi.get_movie_details.side_effect = error
+    await setup_integration(hass, mock_config_entry)
+    client = await hass_client()
+
+    response = await client.get(
+        f"/api/media_player_proxy/{ENTITY_ID}/browse_media/movie/1"
+    )
+
+    assert response.status == HTTPStatus.NOT_FOUND
+    assert mock_kodi.get_movie_details.call_args.kwargs["movie_id"] == 1
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_empty_video_library(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test an empty video library result is an empty folder."""
+    mock_kodi.get_movies.return_value = {
+        "limits": {"start": 0, "end": 0, "total": 0},
+        "movies": [],
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE, ATTR_MEDIA_CONTENT_ID: ""}
+    )
+
+    assert result["title"] == "Movies"
+    assert result["children"] == []
+
+
+@pytest.mark.usefixtures("mock_connection", "int_max_str_digits")
+@pytest.mark.parametrize(
+    ("media_type", "media_id", "requests"),
+    [
+        (
+            MediaType.ALBUM,
+            "0010",
+            {"get_album_details": {"album_id": 10}, "get_songs": {"album_id": 10}},
+        ),
+        (
+            MediaType.ALBUM,
+            "0" * 4299 + "1",
+            {"get_album_details": {"album_id": 1}, "get_songs": {"album_id": 1}},
+        ),
+        (
+            MediaType.ARTIST,
+            "4",
+            {"get_albums": {"artist_id": 4}, "get_artist_details": {"artist_id": 4}},
+        ),
+        (
+            MediaType.TVSHOW,
+            "3",
+            {
+                "get_seasons": {"tv_show_id": 3},
+                "get_tv_show_details": {"tv_show_id": 3},
+            },
+        ),
+        (MediaType.SEASON, "3/0", {"get_episodes": {"tv_show_id": 3, "season_id": 0}}),
+        (
+            MediaType.SEASON,
+            "0003/00",
+            {"get_episodes": {"tv_show_id": 3, "season_id": 0}},
+        ),
+    ],
+)
+async def test_browse_media_asks_kodi_for_the_browsed_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    media_type: str,
+    media_id: str,
+    requests: dict[str, dict[str, int]],
+) -> None:
+    """Test browsing an item asks Kodi for the items of that ID."""
+    mock_kodi.get_album_details.return_value = {
+        "albumdetails": {"label": "First Light", "art": {}}
+    }
+    mock_kodi.get_artist_details.return_value = {
+        "artistdetails": {"label": "The Lanterns", "art": {}}
+    }
+    mock_kodi.get_tv_show_details.return_value = {
+        "tvshowdetails": {"label": "Example Show", "art": {}}
+    }
+    mock_kodi.get_songs.return_value = {"songs": []}
+    mock_kodi.get_albums.return_value = {"albums": []}
+    mock_kodi.get_seasons.return_value = {"seasons": []}
+    mock_kodi.get_episodes.return_value = {"episodes": []}
+    await setup_integration(hass, mock_config_entry)
+
+    await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: media_type, ATTR_MEDIA_CONTENT_ID: media_id}
+    )
+
+    assert {
+        method: {key: getattr(mock_kodi, method).call_args.kwargs[key] for key in ids}
+        for method, ids in requests.items()
+    } == requests
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_item_thumbnail_for_an_external_client(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test a browsed item gets a thumbnail URL of the image proxy for an external client."""
+    mock_kodi.get_seasons.return_value = {"seasons": []}
+    mock_kodi.get_tv_show_details.return_value = {
+        "tvshowdetails": {"label": "Example Show", "art": {"poster": "image://poster/"}}
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.TVSHOW, ATTR_MEDIA_CONTENT_ID: "1"}
+    )
+
+    assert urlsplit(result["thumbnail"]).path == (
+        f"/api/media_player_proxy/{ENTITY_ID}/browse_media/tvshow/1"
+    )
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_browse_media_movie_asks_kodi_for_the_browsed_id(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test browsing a movie asks Kodi for that movie, which is not a folder."""
+    mock_kodi.get_movie_details.return_value = {
+        "moviedetails": {"label": "Example Movie", "art": {}}
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    with pytest.raises(BrowseError) as exc_info:
+        await browse_media_action(
+            hass,
+            {ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE, ATTR_MEDIA_CONTENT_ID: "0007"},
+        )
+
+    assert exc_info.value.translation_key == "media_not_found"
+    assert mock_kodi.get_movie_details.call_args.kwargs["movie_id"] == 7
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("media_type", "media_id"), [(MediaType.SEASON, "1/0"), (MediaType.TVSHOW, "1")]
+)
+async def test_browse_media_item_without_an_image_has_no_thumbnail(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    media_type: str,
+    media_id: str,
+) -> None:
+    """Test a browsed item Kodi has no image for gets no thumbnail URL."""
+    mock_kodi.get_episodes.return_value = {"episodes": []}
+    mock_kodi.get_seasons.return_value = {"seasons": []}
+    mock_kodi.get_tv_show_details.return_value = {
+        "tvshowdetails": {"label": "Example Show", "art": {}}
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: media_type, ATTR_MEDIA_CONTENT_ID: media_id}
+    )
+
+    assert result["thumbnail"] is None
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("movie", "path"),
+    [
+        ({"thumbnail": "", "art": {}}, None),
+        ({"thumbnail": ""}, None),
+        (
+            {"thumbnail": "image://thumb/", "art": {}},
+            f"/api/media_player_proxy/{ENTITY_ID}/browse_media/movie/7",
+        ),
+        (
+            {"thumbnail": "", "art": {"poster": "image://poster/"}},
+            f"/api/media_player_proxy/{ENTITY_ID}/browse_media/movie/7",
+        ),
+    ],
+)
+async def test_browse_media_child_thumbnail(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    movie: dict[str, Any],
+    path: str | None,
+) -> None:
+    """Test a listed item gets a thumbnail URL of the image proxy only with an image."""
+    mock_kodi.get_movies.return_value = {
+        "movies": [{"movieid": 7, "label": "Example Movie", **movie}]
+    }
+    await setup_integration(hass, mock_config_entry)
+
+    result = await browse_media_action(
+        hass, {ATTR_MEDIA_CONTENT_TYPE: MediaType.MOVIE, ATTR_MEDIA_CONTENT_ID: ""}
+    )
+
+    thumbnail = result["children"][0]["thumbnail"]
+    assert (thumbnail and urlsplit(thumbnail).path) == path

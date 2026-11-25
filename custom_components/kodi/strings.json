@@ -95,11 +95,17 @@
     "invalid_displaytime": {
       "message": "Display time {displaytime} is not a number of at least 1500 milliseconds."
     },
+    "invalid_library_id": {
+      "message": "Media ID {media_id} is not a Kodi library ID."
+    },
     "invalid_media_id": {
       "message": "Media ID {media_id} is not a number."
     },
     "invalid_media_type": {
       "message": "Media type {media_type} is not supported. Use `SONG` or `ALBUM`."
+    },
+    "invalid_season_id": {
+      "message": "Season ID {media_id} is not a Kodi TV show ID and a season number, separated by a slash."
     },
     "kodi_off": {
       "message": "{name} is off and cannot run {func}."

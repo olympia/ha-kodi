@@ -854,9 +854,10 @@ class KodiEntity(MediaPlayerEntity):
                 self.hass, media_content_id, content_filter=media_source_content_filter
             )
 
+        search_id = media_content_id or ""
         payload = {
             "search_type": media_content_type,
-            "search_id": media_content_id,
+            "search_id": search_id,
         }
 
         try:
@@ -871,7 +872,7 @@ class KodiEntity(MediaPlayerEntity):
                 translation_key="media_not_found",
                 translation_placeholders={
                     "media_content_type": str(media_content_type),
-                    "media_content_id": str(media_content_id),
+                    "media_content_id": search_id,
                 },
             )
         return response
@@ -888,7 +889,7 @@ class KodiEntity(MediaPlayerEntity):
             image_url, _, _ = await get_media_info(
                 self._kodi, media_content_id, media_content_type
             )
-        except ProtocolError, TransportError:
+        except ProtocolError, TransportError, BrowseError:
             return (None, None)
 
         if image_url:
