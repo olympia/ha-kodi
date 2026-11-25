@@ -2031,28 +2031,6 @@ async def test_add_to_playlist_invalid_input(
     assert playlist_writes(mock_kodi) == []
 
 
-@pytest.mark.usefixtures("mock_connection")
-@pytest.mark.parametrize(
-    "error", [TransportError("No reply"), ProtocolError("Invalid params")]
-)
-async def test_add_to_playlist_library_error(
-    hass: HomeAssistant,
-    mock_config_entry: MockConfigEntry,
-    mock_kodi: MagicMock,
-    error: Exception,
-) -> None:
-    """Test an error of the Kodi library is not reported as invalid input."""
-    set_library(mock_kodi, LIBRARY)
-    await setup_integration(hass, mock_config_entry)
-    mock_kodi.get_songs.side_effect = error
-
-    with pytest.raises(type(error)) as exc_info:
-        await add_to_playlist(hass, media_type="SONG", media_name="Night Drive")
-
-    assert exc_info.value is error
-    assert playlist_writes(mock_kodi) == []
-
-
 def command(service: str, data: dict[str, Any], method: str, func: str) -> Any:
     """Return a media player action and the Kodi request it sends."""
     return pytest.param(service, data, method, func, id=service)
@@ -2467,6 +2445,173 @@ async def test_background_command_error_keeps_the_credentials_out_of_the_log(
         for record in caplog.records
         if record.name == "homeassistant.core" and record.exc_info
     ] == [message]
+    assert "dXNlcjpwYXNz" not in caplog.text
+
+
+ADD_TO_PLAYLIST_KODI_CALLS = [
+    pytest.param(
+        {"media_type": "SONG", "media_name": "Night Drive", "artist_name": "Mr. Lamp"},
+        "get_artists",
+        id="find_artist",
+    ),
+    pytest.param(
+        {"media_type": "SONG", "media_name": "Night Drive"},
+        "get_songs",
+        id="find_song",
+    ),
+    pytest.param(
+        {"media_type": "ALBUM", "media_name": "Night Drive"},
+        "get_albums",
+        id="find_album",
+    ),
+    pytest.param(
+        {"media_type": "ALBUM", "media_name": "ALL", "artist_name": "Mr. Lamp"},
+        "get_albums",
+        id="all_albums",
+    ),
+    pytest.param(
+        {"media_type": "SONG", "media_id": "22"},
+        "add_song_to_playlist",
+        id="add_song",
+    ),
+    pytest.param(
+        {"media_type": "ALBUM", "media_id": "12"},
+        "add_album_to_playlist",
+        id="add_album",
+    ),
+]
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (TransportError("No reply"), "No reply"),
+        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+    ],
+)
+@pytest.mark.parametrize(("data", "method"), ADD_TO_PLAYLIST_KODI_CALLS)
+async def test_add_to_playlist_kodi_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    data: dict[str, str],
+    method: str,
+    error: Exception,
+    reason: str,
+) -> None:
+    """Test kodi.add_to_playlist reports a failed Kodi request with its reason."""
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    getattr(mock_kodi, method).side_effect = error
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await add_to_playlist(hass, **data)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_add_media_to_playlist",
+        "error": reason,
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_add_to_playlist_fails_between_albums(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test kodi.add_to_playlist reports a failed write after an added album."""
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.add_album_to_playlist.side_effect = [
+        None,
+        ProtocolError(-32602, "Invalid params.", {}),
+    ]
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await add_to_playlist(
+            hass, media_type="ALBUM", media_name="ALL", artist_name="The Lanterns"
+        )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_add_media_to_playlist",
+        "error": "Invalid params. (-32602)",
+    }
+    assert playlist_writes(mock_kodi) == [
+        call.add_album_to_playlist(10),
+        call.add_album_to_playlist(11),
+    ]
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(("data", "method"), ADD_TO_PLAYLIST_KODI_CALLS)
+async def test_add_to_playlist_while_kodi_is_off(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    data: dict[str, str],
+    method: str,
+) -> None:
+    """Test kodi.add_to_playlist reports a failed request while Kodi is off."""
+    set_library(mock_kodi, LIBRARY)
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+    getattr(mock_kodi, method).side_effect = TransportError("Connection lost")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await add_to_playlist(hass, **data)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "kodi_off"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_add_media_to_playlist",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_background_add_to_playlist_error_keeps_the_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test the logged error of kodi.add_to_playlist in the background has no login."""
+    caplog.set_level(logging.DEBUG)
+    set_library(mock_kodi, LIBRARY)
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.get_songs.side_effect = login_page_error()
+
+    await hass.services.async_call(
+        DOMAIN,
+        "add_to_playlist",
+        {ATTR_ENTITY_ID: ENTITY_ID, "media_type": "SONG", "media_name": "Night Drive"},
+    )
+    await hass.async_block_till_done()
+
+    assert [
+        str(record.exc_info[1])
+        for record in caplog.records
+        if record.name == "homeassistant.core" and record.exc_info
+    ] == [
+        "Error calling async_add_media_to_playlist on name: 200, message='Attempt "
+        "to decode JSON with unexpected mimetype: text/html', "
+        "url='http://1.1.1.1:8080/jsonrpc'"
+    ]
     assert "dXNlcjpwYXNz" not in caplog.text
 
 

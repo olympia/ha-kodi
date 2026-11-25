@@ -719,6 +719,7 @@ class KodiEntity(MediaPlayerEntity):
         elif media_type == MediaType.TRACK:
             await self._kodi.add_song_to_playlist(int(media_id))
 
+    @cmd
     async def async_add_media_to_playlist(
         self, media_type, media_id=None, media_name=None, artist_name=""
     ):
