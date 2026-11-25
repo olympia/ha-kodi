@@ -8,10 +8,9 @@ import logging
 from typing import Any
 from unittest.mock import MagicMock, call
 
-from aiohttp import ClientConnectionError, ContentTypeError, RequestInfo
+from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
 from jsonrpc_base.jsonrpc import ProtocolError, TransportError
-from multidict import CIMultiDict, CIMultiDictProxy
 from pykodi import CannotConnectError
 import pytest
 from pytest_homeassistant.common import (
@@ -23,7 +22,6 @@ from pytest_homeassistant.common import (
 )
 from syrupy.assertion import SnapshotAssertion
 from syrupy.filters import props
-from yarl import URL
 
 from custom_components.kodi.const import DOMAIN
 from homeassistant.components.media_player import (
@@ -56,7 +54,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
 from . import AUDIO_PLAYER, VIDEO_PLAYER, set_idle, set_playing, setup_integration
-from .util import UUID
+from .util import UUID, login_page_error
 
 ENTITY_ID = "media_player.name"
 ATTR_DYNAMIC_RANGE = "dynamic_range"
@@ -2355,30 +2353,6 @@ async def test_failed_poll_is_a_debug_message(
         for record in refresh_error_records(caplog)
     ] == [(logging.DEBUG, f"Error refreshing {ENTITY_ID}: Connection lost")]
     assert info_records(caplog, "Kodi at 1.1.1.1 is unavailable") == 1
-
-
-def login_page_error() -> TransportError:
-    """Return the error of a login page a proxy sends with 200 OK.
-
-    It is wrapped like jsonrpc-async does, with the login in the request.
-    """
-    url = URL("http://1.1.1.1:8080/jsonrpc")
-    request_info = RequestInfo(
-        url,
-        "POST",
-        CIMultiDictProxy(CIMultiDict({"Authorization": "Basic dXNlcjpwYXNz"})),
-        url,
-    )
-    return TransportError(
-        "Cannot deserialize response body",
-        None,
-        ContentTypeError(
-            request_info,
-            (),
-            status=200,
-            message="Attempt to decode JSON with unexpected mimetype: text/html",
-        ),
-    )
 
 
 @pytest.mark.usefixtures("mock_connection")

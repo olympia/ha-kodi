@@ -92,6 +92,9 @@
     "communication_error": {
       "message": "Error calling {func} on {name}: {error}"
     },
+    "invalid_displaytime": {
+      "message": "Display time {displaytime} is not a number of at least 1500 milliseconds."
+    },
     "invalid_media_id": {
       "message": "Media ID {media_id} is not a number."
     },
@@ -118,6 +121,9 @@
     },
     "notify_failed": {
       "message": "Unable to send the notification to Kodi. Is Kodi online?"
+    },
+    "notify_rejected": {
+      "message": "Kodi replied to the notification with an error or an invalid response: {error}"
     },
     "song_not_found": {
       "message": "No song matching {media_name} was found in the Kodi music library."

@@ -22,11 +22,12 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
+from .connection import _error_text
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_PORT = 8080
 DEFAULT_PROXY_SSL = False
 DEFAULT_TIMEOUT = 5
+# The JSON-RPC schema of GUI.ShowNotification rejects a shorter display time
+MIN_DISPLAYTIME = 1500
 
 PLATFORM_SCHEMA = NOTIFY_PLATFORM_SCHEMA.extend(
     {
@@ -47,6 +50,21 @@ PLATFORM_SCHEMA = NOTIFY_PLATFORM_SCHEMA.extend(
 
 ATTR_DISPLAYTIME = "displaytime"
 ATTR_ICON = "icon"
+
+
+def _displaytime(value: Any) -> int:
+    """Return the display time in milliseconds, or raise if Kodi would reject it."""
+    try:
+        displaytime = int(value)
+    except TypeError, ValueError, OverflowError:
+        displaytime = None
+    if displaytime is None or displaytime < MIN_DISPLAYTIME:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_displaytime",
+            translation_placeholders={"displaytime": str(value)},
+        )
+    return displaytime
 
 
 async def async_get_service(
@@ -98,16 +116,23 @@ class KodiNotificationService(BaseNotificationService):
     @override
     async def async_send_message(self, message: str = "", **kwargs: Any) -> None:
         """Send a message to Kodi."""
+        data = kwargs.get(ATTR_DATA) or {}
+
+        displaytime = _displaytime(data.get(ATTR_DISPLAYTIME, 10000))
+        icon = data.get(ATTR_ICON, "info")
+        title = kwargs.get(ATTR_TITLE, ATTR_TITLE_DEFAULT)
+        # A TransportError prints its arguments, and they can hold the request
+        # with its login, so the errors are not chained
         try:
-            data = kwargs.get(ATTR_DATA) or {}
-
-            displaytime = int(data.get(ATTR_DISPLAYTIME, 10000))
-            icon = data.get(ATTR_ICON, "info")
-            title = kwargs.get(ATTR_TITLE, ATTR_TITLE_DEFAULT)
             await self._server.GUI.ShowNotification(title, message, icon, displaytime)
-
-        except jsonrpc_async.TransportError as err:
+        except jsonrpc_async.TransportError:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="notify_failed",
-            ) from err
+            ) from None
+        except jsonrpc_async.ProtocolError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="notify_rejected",
+                translation_placeholders={"error": _error_text(err)},
+            ) from None

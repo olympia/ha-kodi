@@ -28,7 +28,7 @@ rules:
   # Silver
   action-exceptions:
     status: todo
-    comment: A failed kodi.call_method is logged instead of raised, and the notify service lets ProtocolError through.
+    comment: A failed kodi.call_method is logged instead of raised.
   config-entry-unloading: done
   docs-configuration-parameters:
     status: exempt

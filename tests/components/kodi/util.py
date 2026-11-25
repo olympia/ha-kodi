@@ -2,6 +2,11 @@
 
 from ipaddress import ip_address
 
+from aiohttp import ContentTypeError, RequestInfo
+from jsonrpc_base.jsonrpc import TransportError
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
+
 from custom_components.kodi.const import DEFAULT_SSL
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
@@ -116,3 +121,27 @@ class MockWSConnection:
     def server(self):
         """Mock server."""
         return None
+
+
+def login_page_error() -> TransportError:
+    """Return the error of a login page a proxy sends with 200 OK.
+
+    It is wrapped like jsonrpc-async does, with the login in the request.
+    """
+    url = URL("http://1.1.1.1:8080/jsonrpc")
+    request_info = RequestInfo(
+        url,
+        "POST",
+        CIMultiDictProxy(CIMultiDict({"Authorization": "Basic dXNlcjpwYXNz"})),
+        url,
+    )
+    return TransportError(
+        "Cannot deserialize response body",
+        None,
+        ContentTypeError(
+            request_info,
+            (),
+            status=200,
+            message="Attempt to decode JSON with unexpected mimetype: text/html",
+        ),
+    )
