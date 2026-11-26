@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from aiohttp import ClientConnectionError
 from freezegun.api import FrozenDateTimeFactory
-from jsonrpc_base.jsonrpc import ProtocolError, TransportError
+from jsonrpc_base.jsonrpc import ProtocolError, Request, TransportError
 from pykodi import CannotConnectError
 import pytest
 from pytest_homeassistant.common import (
@@ -3534,3 +3534,342 @@ async def test_browse_media_child_thumbnail(
 
     thumbnail = result["children"][0]["thumbnail"]
     assert (thumbnail and urlsplit(thumbnail).path) == path
+
+
+CALL_METHOD_EVENT = f"{DOMAIN}_call_method_result"
+
+
+async def call_method(hass: HomeAssistant, method: str, **params: Any) -> None:
+    """Call the call_method action on the Kodi media player."""
+    await hass.services.async_call(
+        DOMAIN,
+        "call_method",
+        {ATTR_ENTITY_ID: ENTITY_ID, "method": method, **params},
+        blocking=True,
+    )
+
+
+def kodi_reply(reply: Any) -> Callable[..., Any]:
+    """Return a call_method side effect that parses the reply with jsonrpc-base."""
+    return lambda *args, **kwargs: Request("JSONRPC.Ping", None, "1").parse_response(
+        reply
+    )
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    ("result", "events"),
+    [
+        pytest.param(
+            {"version": {"major": 13}},
+            [
+                {
+                    "entity_id": ENTITY_ID,
+                    "result": {"version": {"major": 13}},
+                    "result_ok": True,
+                    "input": {
+                        "method": "JSONRPC.Version",
+                        "params": {"properties": ["version"]},
+                    },
+                }
+            ],
+            id="object",
+        ),
+        pytest.param(
+            {},
+            [
+                {
+                    "entity_id": ENTITY_ID,
+                    "result": {},
+                    "result_ok": True,
+                    "input": {
+                        "method": "JSONRPC.Version",
+                        "params": {"properties": ["version"]},
+                    },
+                }
+            ],
+            id="empty_object",
+        ),
+        pytest.param("OK", [], id="not_an_object"),
+        pytest.param([], [], id="list"),
+    ],
+)
+async def test_call_method(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    result: Any,
+    events: list[dict[str, Any]],
+) -> None:
+    """Test kodi.call_method sends the method and fires an event for an object."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.return_value = result
+    fired = async_capture_events(hass, CALL_METHOD_EVENT)
+
+    await call_method(hass, "JSONRPC.Version", properties=["version"])
+
+    mock_kodi.call_method.assert_called_once_with(
+        "JSONRPC.Version", properties=["version"]
+    )
+    assert [event.data for event in fired] == events
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param({"code": -32601, "message": "Method not found."}, id="error"),
+        pytest.param({}, id="empty_error"),
+    ],
+)
+async def test_call_method_error_reply(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    error: dict[str, Any],
+) -> None:
+    """Test kodi.call_method fires the error object of Kodi, then raises."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.side_effect = kodi_reply(
+        {"jsonrpc": "2.0", "id": "1", "error": error}
+    )
+    fired = async_capture_events(hass, CALL_METHOD_EVENT)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await call_method(hass, "JSONRPC.Missing", value=1)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "kodi_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_call_method",
+    }
+    assert [event.data for event in fired] == [
+        {
+            "entity_id": ENTITY_ID,
+            "result": error,
+            "result_ok": False,
+            "input": {"method": "JSONRPC.Missing", "params": {"value": 1}},
+        }
+    ]
+    # The error reaches the caller, so the integration logs no warning or error for it
+    assert [
+        record
+        for record in caplog.records
+        if record.name.startswith("custom_components.kodi")
+        and record.levelno >= logging.WARNING
+    ] == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "reply",
+    [
+        pytest.param([], id="list"),
+        pytest.param({"jsonrpc": "2.0", "id": "1", "error": None}, id="null_error"),
+        pytest.param({"jsonrpc": "2.0", "id": "1"}, id="no_result"),
+    ],
+)
+async def test_call_method_invalid_reply(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    reply: Any,
+) -> None:
+    """Test kodi.call_method raises for a reply without a result or an error object."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.side_effect = kodi_reply(reply)
+    fired = async_capture_events(hass, CALL_METHOD_EVENT)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await call_method(hass, "JSONRPC.Ping")
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "kodi_error"
+    assert fired == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_call_method_transport_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test kodi.call_method raises when Kodi cannot be reached."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.side_effect = TransportError("No reply")
+    fired = async_capture_events(hass, CALL_METHOD_EVENT)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await call_method(hass, "JSONRPC.Ping")
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_call_method",
+    }
+    assert fired == []
+    # The error reaches the caller, so the integration logs no warning or error for it
+    assert [
+        record
+        for record in caplog.records
+        if record.name.startswith("custom_components.kodi")
+        and record.levelno >= logging.WARNING
+    ] == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_call_method_while_kodi_is_off(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test kodi.call_method reports a failed request while Kodi is off."""
+    await set_playing(hass, mock_kodi)
+    await setup_integration(hass, mock_config_entry)
+    await turn_off_by_failed_poll(hass, mock_kodi, freezer)
+    mock_kodi.call_method.side_effect = TransportError("Connection lost")
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await call_method(hass, "JSONRPC.Ping")
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "kodi_off"
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_call_method",
+    }
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param("Ping", id="no_namespace"),
+        pytest.param("JSONRPC.Ping.Now", id="two_dots"),
+        pytest.param("A.B.C.D", id="three_dots"),
+        pytest.param("", id="empty"),
+        pytest.param("_JSONRPC.Ping", id="leading_underscore"),
+    ],
+)
+async def test_call_method_invalid_method(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    method: str,
+) -> None:
+    """Test kodi.call_method refuses a method name its client libraries would reject."""
+    await setup_integration(hass, mock_config_entry)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await call_method(hass, method)
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "invalid_method"
+    assert exc_info.value.translation_placeholders == {"method": method}
+    mock_kodi.call_method.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "method",
+    [
+        pytest.param(".", id="dot"),
+        pytest.param("JSONRPC.", id="no_method"),
+        pytest.param(".Ping", id="no_namespace"),
+        pytest.param("JSONRPC._Ping", id="underscore_method"),
+        pytest.param(" JSONRPC.Ping ", id="surrounding_spaces"),
+    ],
+)
+async def test_call_method_sends_names_the_client_libraries_accept(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    method: str,
+) -> None:
+    """Test kodi.call_method leaves any other method name for Kodi to judge."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.return_value = "OK"
+
+    await call_method(hass, method)
+
+    mock_kodi.call_method.assert_called_once_with(method)
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_call_method_param_named_obj(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test kodi.call_method sends a param named like the entity argument of cmd."""
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.return_value = "OK"
+
+    await call_method(hass, "JSONRPC.Ping", obj=1)
+
+    mock_kodi.call_method.assert_called_once_with("JSONRPC.Ping", obj=1)
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_call_method_invalid_method_with_param_named_obj(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+) -> None:
+    """Test kodi.call_method refuses an invalid method name with a param named obj."""
+    await setup_integration(hass, mock_config_entry)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await call_method(hass, "Ping", obj=1)
+
+    assert exc_info.value.translation_key == "invalid_method"
+    assert exc_info.value.translation_placeholders == {"method": "Ping"}
+    mock_kodi.call_method.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_connection")
+async def test_background_call_method_error_keeps_the_credentials_out_of_the_log(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test the logged error of kodi.call_method in the background has no login."""
+    caplog.set_level(logging.DEBUG)
+    await setup_integration(hass, mock_config_entry)
+    await make_kodi_idle(hass, mock_kodi, freezer)
+    mock_kodi.call_method.side_effect = login_page_error()
+
+    await hass.services.async_call(
+        DOMAIN, "call_method", {ATTR_ENTITY_ID: ENTITY_ID, "method": "JSONRPC.Ping"}
+    )
+    await hass.async_block_till_done()
+
+    assert [
+        str(record.exc_info[1])
+        for record in caplog.records
+        if record.name == "homeassistant.core" and record.exc_info
+    ] == ["Could not communicate with name to run async_call_method"]
+    assert (
+        "Running async_call_method on name failed: 200, message='Attempt to decode "
+        "JSON with unexpected mimetype: text/html', url='http://1.1.1.1:8080/jsonrpc'"
+    ) in caplog.text
+    assert "dXNlcjpwYXNz" not in caplog.text

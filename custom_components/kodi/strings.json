@@ -104,6 +104,9 @@
     "invalid_media_type": {
       "message": "Media type {media_type} is not supported. Use `SONG` or `ALBUM`."
     },
+    "invalid_method": {
+      "message": "Method {method} is not a Kodi JSON-RPC method name of the form `Namespace.Method`, for example `JSONRPC.Ping`."
+    },
     "invalid_season_id": {
       "message": "Season ID {media_id} is not a Kodi TV show ID and a season number, separated by a slash."
     },

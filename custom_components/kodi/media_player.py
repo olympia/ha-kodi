@@ -130,7 +130,9 @@ def cmd[_KodiEntityT: KodiEntity, **_P](
     """Raise a translated error when Kodi fails a command."""
 
     @wraps(func)
-    async def wrapper(obj: _KodiEntityT, *args: _P.args, **kwargs: _P.kwargs) -> None:
+    async def wrapper(
+        obj: _KodiEntityT, /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> None:
         """Wrap all command methods."""
         try:
             await func(obj, *args, **kwargs)
@@ -677,43 +679,42 @@ class KodiEntity(MediaPlayerEntity):
             raise _validation_error("no_active_player", name=self.device_name)
         await self._kodi.set_shuffle(shuffle)
 
-    async def async_call_method(self, method, **kwargs):
+    @cmd
+    async def async_call_method(self, method: str, **kwargs: Any) -> None:
         """Run Kodi JSONRPC API method with params."""
         _LOGGER.debug("Run API method %s, kwargs=%s", method, kwargs)
-        result_ok = False
+        # PyKodi and jsonrpc-base raise untranslated errors for other method names
+        if method.count(".") != 1 or method.startswith("_"):
+            raise _validation_error("invalid_method", method=method)
         try:
             result = await self._kodi.call_method(method, **kwargs)
-            result_ok = True
         except ProtocolError as exc:
-            result = exc.args[2]["error"]
-            _LOGGER.error(
-                "Run API method %s.%s(%s) error: %s",
-                self.entity_id,
-                method,
-                kwargs,
-                result,
-            )
-        except TransportError:
-            result = None
-            _LOGGER.warning(
-                "TransportError trying to run API method %s.%s(%s)",
-                self.entity_id,
-                method,
-                kwargs,
-            )
-
+            # Only a reply with an error object raises a ProtocolError with three arguments
+            if len(exc.args) == 3:
+                self._fire_call_method_result(
+                    method, kwargs, exc.args[2]["error"], result_ok=False
+                )
+            raise
         if isinstance(result, dict):
-            event_data = {
-                "entity_id": self.entity_id,
-                "result": result,
-                "result_ok": result_ok,
-                "input": {"method": method, "params": kwargs},
-            }
-            _LOGGER.debug("EVENT kodi_call_method_result: %s", event_data)
-            self.hass.bus.async_fire(
-                EVENT_KODI_CALL_METHOD_RESULT, event_data=event_data
-            )
-        return result
+            self._fire_call_method_result(method, kwargs, result, result_ok=True)
+
+    def _fire_call_method_result(
+        self,
+        method: str,
+        params: dict[str, Any],
+        result: dict[str, Any],
+        *,
+        result_ok: bool,
+    ) -> None:
+        """Fire the event with the result of kodi.call_method."""
+        event_data = {
+            "entity_id": self.entity_id,
+            "result": result,
+            "result_ok": result_ok,
+            "input": {"method": method, "params": params},
+        }
+        _LOGGER.debug("EVENT kodi_call_method_result: %s", event_data)
+        self.hass.bus.async_fire(EVENT_KODI_CALL_METHOD_RESULT, event_data=event_data)
 
     @override
     async def async_clear_playlist(self) -> None:
