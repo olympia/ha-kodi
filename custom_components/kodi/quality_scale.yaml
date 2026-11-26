@@ -80,7 +80,7 @@ rules:
     comment: The media player uses the name of its device.
   exception-translations:
     status: todo
-    comment: Some messages carry the untranslated error text of the client.
+    comment: The notify service raises an untranslated error for a password that Latin-1 cannot encode.
   icon-translations:
     status: exempt
     comment: The media player has no icon of its own.

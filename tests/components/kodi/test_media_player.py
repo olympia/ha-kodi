@@ -2108,38 +2108,39 @@ async def test_command_error(
 
     assert exc_info.value.translation_domain == DOMAIN
     assert exc_info.value.translation_key == "communication_error"
-    assert exc_info.value.translation_placeholders == {
-        "name": "name",
-        "func": func,
-        "error": "Connection lost",
-    }
+    assert exc_info.value.translation_placeholders == {"name": "name", "func": func}
 
 
 @pytest.mark.usefixtures("mock_connection")
 @pytest.mark.parametrize(
-    ("error", "text"),
+    ("error", "translation_key", "text"),
     [
         pytest.param(
             TransportError("Transport Error", None, ClientConnectionError("Reset")),
+            "communication_error",
             "Reset",
             id="connection_error",
         ),
         pytest.param(
             ProtocolError(-32100, "Failed to execute method.", {"error": {}}),
+            "kodi_error",
             "Failed to execute method. (-32100)",
             id="kodi_error",
         ),
     ],
 )
-async def test_command_error_text(
+async def test_command_error_reason(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_kodi: MagicMock,
     freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
     error: Exception,
+    translation_key: str,
     text: str,
 ) -> None:
-    """Test the error of a command tells why Kodi failed it."""
+    """Test the error of a command names the kind of failure and logs its reason."""
+    caplog.set_level(logging.DEBUG)
     await set_playing(hass, mock_kodi)
     await setup_integration(hass, mock_config_entry)
     await advance_time(hass, freezer, SCAN_INTERVAL)
@@ -2148,8 +2149,23 @@ async def test_command_error_text(
     with pytest.raises(HomeAssistantError) as exc_info:
         await media_player_action(hass, "media_play_pause", {})
 
-    assert exc_info.value.translation_placeholders["error"] == text
+    assert exc_info.value.translation_key == translation_key
+    assert exc_info.value.translation_placeholders == {
+        "name": "name",
+        "func": "async_media_play_pause",
+    }
     assert exc_info.value.__suppress_context__
+    assert [
+        (record.name, record.levelno, record.getMessage())
+        for record in caplog.records
+        if record.getMessage().startswith("Running ")
+    ] == [
+        (
+            "custom_components.kodi.media_player",
+            logging.DEBUG,
+            f"Running async_media_play_pause on name failed: {text}",
+        )
+    ]
 
 
 async def make_kodi_idle(
@@ -2389,12 +2405,7 @@ async def test_refresh_error_keeps_the_credentials_out_of_the_log(
 @pytest.mark.parametrize(
     ("make_state", "message"),
     [
-        (
-            make_kodi_idle,
-            "Error calling async_volume_up on name: 200, message='Attempt to decode "
-            "JSON with unexpected mimetype: text/html', "
-            "url='http://1.1.1.1:8080/jsonrpc'",
-        ),
+        (make_kodi_idle, "Could not communicate with name to run async_volume_up"),
         (turn_off_by_failed_poll, "name is off and cannot run async_volume_up"),
     ],
 )
@@ -2426,6 +2437,10 @@ async def test_background_command_error_keeps_the_credentials_out_of_the_log(
         for record in caplog.records
         if record.name == "homeassistant.core" and record.exc_info
     ] == [message]
+    assert (
+        "Running async_volume_up on name failed: 200, message='Attempt to decode "
+        "JSON with unexpected mimetype: text/html', url='http://1.1.1.1:8080/jsonrpc'"
+    ) in caplog.text
     assert "dXNlcjpwYXNz" not in caplog.text
 
 
@@ -2465,10 +2480,12 @@ ADD_TO_PLAYLIST_KODI_CALLS = [
 
 @pytest.mark.usefixtures("mock_connection")
 @pytest.mark.parametrize(
-    ("error", "reason"),
+    ("error", "translation_key"),
     [
-        (TransportError("No reply"), "No reply"),
-        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+        pytest.param(TransportError("No reply"), "communication_error", id="transport"),
+        pytest.param(
+            ProtocolError(-32602, "Invalid params.", {}), "kodi_error", id="protocol"
+        ),
     ],
 )
 @pytest.mark.parametrize(("data", "method"), ADD_TO_PLAYLIST_KODI_CALLS)
@@ -2480,9 +2497,9 @@ async def test_add_to_playlist_kodi_error(
     data: dict[str, str],
     method: str,
     error: Exception,
-    reason: str,
+    translation_key: str,
 ) -> None:
-    """Test kodi.add_to_playlist reports a failed Kodi request with its reason."""
+    """Test kodi.add_to_playlist reports a failed Kodi request."""
     set_library(mock_kodi, LIBRARY)
     await setup_integration(hass, mock_config_entry)
     await make_kodi_idle(hass, mock_kodi, freezer)
@@ -2492,11 +2509,10 @@ async def test_add_to_playlist_kodi_error(
         await add_to_playlist(hass, **data)
 
     assert exc_info.value.translation_domain == DOMAIN
-    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_key == translation_key
     assert exc_info.value.translation_placeholders == {
         "name": "name",
         "func": "async_add_media_to_playlist",
-        "error": reason,
     }
 
 
@@ -2522,11 +2538,10 @@ async def test_add_to_playlist_fails_between_albums(
         )
 
     assert exc_info.value.translation_domain == DOMAIN
-    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_key == "kodi_error"
     assert exc_info.value.translation_placeholders == {
         "name": "name",
         "func": "async_add_media_to_playlist",
-        "error": "Invalid params. (-32602)",
     }
     assert playlist_writes(mock_kodi) == [
         call.add_album_to_playlist(10),
@@ -2588,18 +2603,24 @@ async def test_background_add_to_playlist_error_keeps_the_credentials_out_of_the
         str(record.exc_info[1])
         for record in caplog.records
         if record.name == "homeassistant.core" and record.exc_info
-    ] == [
-        "Error calling async_add_media_to_playlist on name: 200, message='Attempt "
+    ] == ["Could not communicate with name to run async_add_media_to_playlist"]
+    assert (
+        "Running async_add_media_to_playlist on name failed: 200, message='Attempt "
         "to decode JSON with unexpected mimetype: text/html', "
         "url='http://1.1.1.1:8080/jsonrpc'"
-    ]
+    ) in caplog.text
     assert "dXNlcjpwYXNz" not in caplog.text
 
 
 @pytest.mark.usefixtures("mock_connection")
 @pytest.mark.parametrize(
-    "error",
-    [TransportError("Connection lost"), ProtocolError(-32100, "Failed", {})],
+    ("error", "translation_key"),
+    [
+        pytest.param(
+            TransportError("Connection lost"), "communication_error", id="transport"
+        ),
+        pytest.param(ProtocolError(-32100, "Failed", {}), "kodi_error", id="protocol"),
+    ],
 )
 async def test_command_error_while_idle(
     hass: HomeAssistant,
@@ -2607,6 +2628,7 @@ async def test_command_error_while_idle(
     mock_kodi: MagicMock,
     freezer: FrozenDateTimeFactory,
     error: Exception,
+    translation_key: str,
 ) -> None:
     """Test a command Kodi fails while nothing plays is not reported as off."""
     set_idle(mock_kodi)
@@ -2618,7 +2640,7 @@ async def test_command_error_while_idle(
     with pytest.raises(HomeAssistantError) as exc_info:
         await media_player_action(hass, "volume_up", {})
 
-    assert exc_info.value.translation_key == "communication_error"
+    assert exc_info.value.translation_key == translation_key
 
 
 @pytest.mark.usefixtures("mock_connection")
@@ -2848,10 +2870,18 @@ async def browse_media(
 
 @pytest.mark.usefixtures("mock_connection")
 @pytest.mark.parametrize(
-    ("error", "reason"),
+    ("error", "message"),
     [
-        (TransportError("No reply"), "No reply"),
-        (ProtocolError(-32602, "Invalid params.", {}), "Invalid params. (-32602)"),
+        pytest.param(
+            TransportError("No reply"),
+            "Could not communicate with name to run async_browse_media",
+            id="transport",
+        ),
+        pytest.param(
+            ProtocolError(-32602, "Invalid params.", {}),
+            "name returned an error or an invalid response for async_browse_media",
+            id="protocol",
+        ),
     ],
 )
 async def test_browse_media_kodi_error(
@@ -2861,7 +2891,7 @@ async def test_browse_media_kodi_error(
     mock_kodi: MagicMock,
     freezer: FrozenDateTimeFactory,
     error: Exception,
-    reason: str,
+    message: str,
 ) -> None:
     """Test a failed Kodi request while browsing gives a translated error."""
     await setup_integration(hass, mock_config_entry)
@@ -2873,7 +2903,7 @@ async def test_browse_media_kodi_error(
     assert not response["success"]
     assert response["error"] == {
         "code": "unknown_error",
-        "message": f"Error calling async_browse_media on name: {reason}",
+        "message": message,
     }
 
 
@@ -2903,7 +2933,6 @@ async def test_browse_media_action_kodi_error(
     assert exc_info.value.translation_placeholders == {
         "name": "name",
         "func": "async_browse_media",
-        "error": "No reply",
     }
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__suppress_context__

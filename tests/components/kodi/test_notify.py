@@ -93,8 +93,11 @@ async def test_send_message_with_invalid_displaytime(
     server.GUI.ShowNotification.assert_not_called()
 
 
-async def test_send_message_transport_error(hass: HomeAssistant) -> None:
-    """Test an unreachable Kodi raises an error instead of only logging."""
+async def test_send_message_transport_error(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test an unreachable Kodi raises an error and logs its reason."""
+    caplog.set_level(logging.DEBUG)
     server = AsyncMock()
     server.GUI.ShowNotification.side_effect = jsonrpc_async.TransportError(
         "Unable to connect"
@@ -108,12 +111,26 @@ async def test_send_message_transport_error(hass: HomeAssistant) -> None:
 
     assert err.value.translation_domain == DOMAIN
     assert err.value.translation_key == "notify_failed"
+    assert err.value.translation_placeholders is None
     assert err.value.__cause__ is None
     assert err.value.__suppress_context__
+    assert [
+        (record.name, record.levelno, record.getMessage())
+        for record in caplog.records
+        if record.name == "custom_components.kodi.notify"
+    ] == [
+        (
+            "custom_components.kodi.notify",
+            logging.DEBUG,
+            "Sending the notification to Kodi failed: Unable to connect",
+        )
+    ]
 
 
-async def test_send_message_rejected(hass: HomeAssistant) -> None:
-    """Test an error reply of Kodi raises an error with its reason."""
+async def test_send_message_rejected(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Test an error reply of Kodi raises an error and logs its reason."""
     server = AsyncMock()
     server.GUI.ShowNotification.side_effect = jsonrpc_async.ProtocolError(
         -32602, "Invalid params.", {}
@@ -127,9 +144,20 @@ async def test_send_message_rejected(hass: HomeAssistant) -> None:
 
     assert err.value.translation_domain == DOMAIN
     assert err.value.translation_key == "notify_rejected"
-    assert err.value.translation_placeholders == {"error": "Invalid params. (-32602)"}
+    assert err.value.translation_placeholders is None
     assert err.value.__cause__ is None
     assert err.value.__suppress_context__
+    assert [
+        (record.name, record.levelno, record.getMessage())
+        for record in caplog.records
+        if record.name == "custom_components.kodi.notify"
+    ] == [
+        (
+            "custom_components.kodi.notify",
+            logging.DEBUG,
+            "Kodi rejected the notification: Invalid params. (-32602)",
+        )
+    ]
 
 
 async def test_background_notify_error_keeps_the_credentials_out_of_the_log(
@@ -149,4 +177,17 @@ async def test_background_notify_error_keeps_the_credentials_out_of_the_log(
         for record in caplog.records
         if record.name == "homeassistant.core" and record.exc_info
     ] == ["Unable to send the notification to Kodi. Is Kodi online?"]
+    assert [
+        (record.name, record.levelno, record.getMessage())
+        for record in caplog.records
+        if record.name == "custom_components.kodi.notify"
+    ] == [
+        (
+            "custom_components.kodi.notify",
+            logging.DEBUG,
+            "Sending the notification to Kodi failed: 200, message='Attempt to "
+            "decode JSON with unexpected mimetype: text/html', "
+            "url='http://1.1.1.1:8080/jsonrpc'",
+        )
+    ]
     assert "dXNlcjpwYXNz" not in caplog.text

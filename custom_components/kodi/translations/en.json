@@ -90,7 +90,7 @@
             "message": "No artist matching {artist_name} was found in the Kodi music library."
         },
         "communication_error": {
-            "message": "Error calling {func} on {name}: {error}"
+            "message": "Could not communicate with {name} to run {func}."
         },
         "invalid_displaytime": {
             "message": "Display time {displaytime} is not a number of at least 1500 milliseconds."
@@ -109,6 +109,9 @@
         },
         "invalid_seek_position": {
             "message": "Seek position {position} is not a finite number."
+        },
+        "kodi_error": {
+            "message": "{name} returned an error or an invalid response for {func}."
         },
         "kodi_off": {
             "message": "{name} is off and cannot run {func}."
@@ -135,7 +138,7 @@
             "message": "Unable to send the notification to Kodi. Is Kodi online?"
         },
         "notify_rejected": {
-            "message": "Kodi replied to the notification with an error or an invalid response: {error}"
+            "message": "Kodi returned an error or an invalid response for the notification."
         },
         "song_not_found": {
             "message": "No song matching {media_name} was found in the Kodi music library."

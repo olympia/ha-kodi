@@ -125,14 +125,17 @@ class KodiNotificationService(BaseNotificationService):
         # with its login, so the errors are not chained
         try:
             await self._server.GUI.ShowNotification(title, message, icon, displaytime)
-        except jsonrpc_async.TransportError:
+        except jsonrpc_async.TransportError as err:
+            _LOGGER.debug(
+                "Sending the notification to Kodi failed: %s", _error_text(err)
+            )
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="notify_failed",
             ) from None
         except jsonrpc_async.ProtocolError as err:
+            _LOGGER.debug("Kodi rejected the notification: %s", _error_text(err))
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="notify_rejected",
-                translation_placeholders={"error": _error_text(err)},
             ) from None

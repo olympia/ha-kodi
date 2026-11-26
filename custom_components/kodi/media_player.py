@@ -108,20 +108,19 @@ def _kodi_error(
     error_class: type[HomeAssistantError] = HomeAssistantError,
 ) -> HomeAssistantError:
     """Return the translated error of a failed Kodi request, to raise from None."""
+    _LOGGER.debug(
+        "Running %s on %s failed: %s", func, entity.device_name, _error_text(exc)
+    )
     if entity.state == MediaPlayerState.OFF:
-        return error_class(
-            translation_domain=DOMAIN,
-            translation_key="kodi_off",
-            translation_placeholders={"name": entity.device_name, "func": func},
-        )
+        translation_key = "kodi_off"
+    elif isinstance(exc, ProtocolError):
+        translation_key = "kodi_error"
+    else:
+        translation_key = "communication_error"
     return error_class(
         translation_domain=DOMAIN,
-        translation_key="communication_error",
-        translation_placeholders={
-            "name": entity.device_name,
-            "func": func,
-            "error": _error_text(exc),
-        },
+        translation_key=translation_key,
+        translation_placeholders={"name": entity.device_name, "func": func},
     )
 
 
