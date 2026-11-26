@@ -5,8 +5,10 @@ import math
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from aiohttp import hdrs, web
 import jsonrpc_async
 import pytest
+from pytest_aiohttp import AiohttpRawServer
 
 from custom_components.kodi.const import DOMAIN
 from homeassistant.components.notify import DOMAIN as NOTIFY_DOMAIN
@@ -43,6 +45,39 @@ async def test_send_message(hass: HomeAssistant) -> None:
     )
 
     server.GUI.ShowNotification.assert_called_once_with("Test", "Hello", "info", 10000)
+
+
+@pytest.mark.usefixtures("socket_enabled")
+async def test_send_message_with_login_outside_latin1(
+    hass: HomeAssistant, aiohttp_raw_server: AiohttpRawServer
+) -> None:
+    """Test the login goes to Kodi encoded as UTF-8."""
+    authorizations: list[str | None] = []
+
+    async def handle(request: web.BaseRequest) -> web.Response:
+        authorizations.append(request.headers.get(hdrs.AUTHORIZATION))
+        body = await request.json()
+        return web.json_response({"jsonrpc": "2.0", "id": body["id"], "result": "OK"})
+
+    server = await aiohttp_raw_server(handle)
+    # Latin-1 has no "ő"
+    config = {
+        NOTIFY_DOMAIN: NOTIFY_CONFIG[NOTIFY_DOMAIN]
+        | {
+            "host": "127.0.0.1",
+            "port": server.port,
+            "username": "kodi",
+            "password": "őszibarack",
+        }
+    }
+    assert await async_setup_component(hass, NOTIFY_DOMAIN, config)
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        NOTIFY_DOMAIN, "kodi", {"message": "Hello"}, blocking=True
+    )
+
+    assert authorizations == ["Basic a29kaTrFkXN6aWJhcmFjaw=="]
 
 
 @pytest.mark.parametrize(

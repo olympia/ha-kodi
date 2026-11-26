@@ -92,7 +92,7 @@ async def async_get_service(
     url = f"{http_protocol}://{host}:{port}/jsonrpc"
 
     if username is not None and password is not None:
-        auth = aiohttp.BasicAuth(username, password)
+        auth = aiohttp.BasicAuth(username, password, encoding="utf-8")
     else:
         auth = None
 
