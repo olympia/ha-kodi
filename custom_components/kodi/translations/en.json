@@ -107,6 +107,9 @@
         "invalid_season_id": {
             "message": "Season ID {media_id} is not a Kodi TV show ID and a season number, separated by a slash."
         },
+        "invalid_seek_position": {
+            "message": "Seek position {position} is not a finite number."
+        },
         "kodi_off": {
             "message": "{name} is off and cannot run {func}."
         },

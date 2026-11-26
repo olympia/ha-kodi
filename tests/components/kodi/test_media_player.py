@@ -6,6 +6,7 @@ from datetime import timedelta
 import hashlib
 from http import HTTPStatus
 import logging
+import math
 import sys
 from typing import Any
 from unittest.mock import MagicMock, call
@@ -2774,6 +2775,56 @@ async def test_shuffle_without_a_player(
     assert exc_info.value.translation_key == "no_active_player"
     assert exc_info.value.translation_placeholders == {"name": name}
     assert mock_kodi.method_calls == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "position",
+    [
+        pytest.param("1e309", id="overflow_string"),
+        pytest.param(math.inf, id="positive_infinity"),
+    ],
+)
+async def test_media_seek_to_an_infinite_position(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    position: str | float,
+) -> None:
+    """Test a seek to a position that is not a finite number leaves Kodi alone."""
+    await setup_integration(hass, mock_config_entry)
+    mock_kodi.reset_mock()
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await media_player_action(hass, "media_seek", {"seek_position": position})
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "invalid_seek_position"
+    assert exc_info.value.translation_placeholders == {"position": "inf"}
+    assert mock_kodi.method_calls == []
+
+
+@pytest.mark.usefixtures("mock_connection")
+@pytest.mark.parametrize(
+    "position",
+    [
+        pytest.param(0.0, id="zero"),
+        pytest.param(10.5, id="fraction"),
+        pytest.param(86401.25, id="over_a_day"),
+    ],
+)
+async def test_media_seek_to_a_finite_position(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_kodi: MagicMock,
+    position: float,
+) -> None:
+    """Test a seek passes a finite position to Kodi unchanged."""
+    await setup_integration(hass, mock_config_entry)
+
+    await media_player_action(hass, "media_seek", {"seek_position": position})
+
+    mock_kodi.media_seek.assert_awaited_once_with(position)
 
 
 async def browse_media(

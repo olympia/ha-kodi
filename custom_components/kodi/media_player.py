@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable, Coroutine
 from functools import wraps
 import logging
+import math
 import re
 from typing import Any, Concatenate, override
 
@@ -618,6 +619,9 @@ class KodiEntity(MediaPlayerEntity):
     @override
     async def async_media_seek(self, position: float) -> None:
         """Send seek command."""
+        # The schema of media_seek lets an infinite position through
+        if not math.isfinite(position):
+            raise _validation_error("invalid_seek_position", position=str(position))
         await self._kodi.media_seek(position)
 
     @cmd
