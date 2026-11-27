@@ -20,6 +20,7 @@ from .util import MockConnection
 
 VIDEO_PLAYER = {"playerid": 1, "type": "video"}
 AUDIO_PLAYER = {"playerid": 0, "type": "audio"}
+PICTURE_PLAYER = {"playerid": 2, "type": "picture"}
 
 PLAYER_PROPERTIES: dict[str, Any] = {
     "time": {"hours": 1, "minutes": 10, "seconds": 5, "milliseconds": 71},

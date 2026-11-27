@@ -13,7 +13,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -22,7 +22,7 @@ from .const import CONF_WS_PORT, DOMAIN
 from .services import async_setup_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.MEDIA_PLAYER]
+PLATFORMS = [Platform.MEDIA_PLAYER, Platform.SENSOR]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -78,6 +78,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None
 
     entry.runtime_data = manager
 
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "deprecated_dynamic_range_attribute",
+        breaks_in_ha_version="2027.6.0",
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="deprecated_dynamic_range_attribute",
+    )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     manager.async_start()
@@ -86,3 +96,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None
 async def async_unload_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None:
     """Unload a config entry."""
     await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: KodiConfigEntry) -> None:
+    """Remove a config entry."""
+    if not hass.config_entries.async_loaded_entries(DOMAIN):
+        ir.async_delete_issue(hass, DOMAIN, "deprecated_dynamic_range_attribute")

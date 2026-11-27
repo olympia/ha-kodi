@@ -64,26 +64,18 @@ rules:
   dynamic-devices:
     status: exempt
     comment: Each config entry has a single, fixed device.
-  entity-category:
-    status: exempt
-    comment: The only entity is the primary media player.
+  entity-category: done
   entity-device-class:
     status: todo
     comment: The media player sets no device class.
   entity-disabled-by-default:
     status: exempt
-    comment: The only entity is the primary media player.
-  entity-translations:
-    status: exempt
-    comment: The media player uses the name of its device.
+    comment: The media player and the dynamic range sensor are the main entities of Kodi.
+  entity-translations: done
   exception-translations: done
-  icon-translations:
-    status: exempt
-    comment: The media player has no icon of its own.
+  icon-translations: done
   reconfiguration-flow: todo
-  repair-issues:
-    status: exempt
-    comment: The integration has no situation where a repair issue is needed.
+  repair-issues: done
   stale-devices:
     status: exempt
     comment: Each config entry has a single, fixed device.

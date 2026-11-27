@@ -19,6 +19,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
 )
 from homeassistant.const import (
+    CONF_HOST,
     CONF_PASSWORD,
     CONF_SSL,
     CONF_USERNAME,
@@ -27,6 +28,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 
@@ -34,6 +36,7 @@ from . import init_integration, setup_integration
 from .util import MockConnection
 
 WATCHDOG_INTERVAL = timedelta(seconds=10)
+DEPRECATED_ATTRIBUTE_ISSUE = "deprecated_dynamic_range_attribute"
 CREDENTIAL_CHECK_INTERVAL = timedelta(minutes=1)
 
 websocket = pytest.mark.parametrize(
@@ -800,3 +803,56 @@ async def test_failed_websocket_update_does_not_check_credentials(
 
     mock_kodi.get_players.assert_awaited()
     assert mock_http_kodi.ping.await_count == 1
+
+
+@pytest.mark.usefixtures("mock_connection", "mock_kodi")
+async def test_setup_entities(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """Test the setup adds the media player and the dynamic range sensor."""
+    await setup_integration(hass, mock_config_entry)
+
+    assert hass.states.get("media_player.name")
+    assert hass.states.get("sensor.name_dynamic_range")
+
+
+@pytest.mark.usefixtures("mock_connection", "mock_kodi")
+async def test_deprecated_dynamic_range_attribute_issue(
+    hass: HomeAssistant,
+    issue_registry: ir.IssueRegistry,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the setup warns that the dynamic range attribute is deprecated."""
+    await setup_integration(hass, mock_config_entry)
+
+    issue = issue_registry.async_get_issue(DOMAIN, DEPRECATED_ATTRIBUTE_ISSUE)
+    assert issue is not None
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.breaks_in_ha_version == "2027.6.0"
+    assert not issue.is_fixable
+    assert issue.translation_key == DEPRECATED_ATTRIBUTE_ISSUE
+
+
+@pytest.mark.usefixtures("mock_connection", "mock_kodi")
+async def test_deprecated_dynamic_range_attribute_issue_removed(
+    hass: HomeAssistant,
+    issue_registry: ir.IssueRegistry,
+    mock_config_entry: MockConfigEntry,
+) -> None:
+    """Test the issue stays until the last Kodi is removed."""
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="other",
+        unique_id="22222222-2222-2222-2222-222222222222",
+        data={**mock_config_entry.data, CONF_HOST: "2.2.2.2"},
+    )
+    await setup_integration(hass, mock_config_entry)
+    await setup_integration(hass, other_entry)
+
+    await hass.config_entries.async_remove(other_entry.entry_id)
+    await hass.async_block_till_done()
+    assert issue_registry.async_get_issue(DOMAIN, DEPRECATED_ATTRIBUTE_ISSUE)
+
+    await hass.config_entries.async_remove(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert not issue_registry.async_get_issue(DOMAIN, DEPRECATED_ATTRIBUTE_ISSUE)

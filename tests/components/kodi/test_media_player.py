@@ -9,7 +9,7 @@ import logging
 import math
 import sys
 from typing import Any
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 from urllib.parse import urlsplit
 
 from aiohttp import ClientConnectionError
@@ -53,6 +53,7 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STARTED,
     EVENT_HOMEASSISTANT_STOP,
     STATE_UNAVAILABLE,
+    Platform,
 )
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -115,6 +116,13 @@ async def pass_watchdog_interval(hass: HomeAssistant) -> None:
     """Let the watchdog interval pass."""
     async_fire_time_changed(hass, dt_util.utcnow() + WATCHDOG_INTERVAL)
     await hass.async_block_till_done()
+
+
+@pytest.fixture(autouse=True)
+def platforms() -> Generator[None]:
+    """Set up only the media player platform."""
+    with patch("custom_components.kodi.PLATFORMS", [Platform.MEDIA_PLAYER]):
+        yield
 
 
 @pytest.mark.usefixtures("mock_connection", "mock_kodi")

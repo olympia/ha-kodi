@@ -15,6 +15,8 @@ It is the Kodi integration of the Home Assistant Core dev branch with:
 - the setup refuses a Kodi that is already set up at the same host and port, and discovery leaves a Kodi alone that was added by hand at the address it announces
 - a description for every field of the setup, with the current names of the Kodi settings
 - `kodi.add_to_playlist` raises an error for input it can not use, like a name that matches nothing in the music library, where it used to add the first item of the library
+- a **Dynamic range** sensor with the HDR format of the video Kodi plays: `sdr`, `hdr10`, `hdr10plus`, `dolbyvision` or `hlg`. It reads the format from the video player of Kodi, so it also works for files that are not in the library. It is `sdr` while no video plays and unknown while Kodi is off or cannot be reached. Without WebSocket it is polled every 10 seconds.
+- the `dynamic_range` attribute of the media player is deprecated. A repair issue asks you to move your automations, scripts and templates to the sensor, because the attribute will be removed in June 2027, with Home Assistant 2027.6.
 
 The [roadmap](#roadmap) lists what comes next.
 
@@ -74,7 +76,7 @@ Each item is a separate change, in the order of the planned core pull requests:
 - the media player becomes unavailable when Kodi is unreachable
 - errors of media player commands and actions are raised instead of only logged
 - a reconfigure step to change the host, port and other settings of a Kodi
-- sensors for the video resolution, HDR format and HDR hints of what Kodi plays
+- more sensors of what Kodi plays, like the video resolution and the HDR formats named in the file name
 - strict typing
 
 ## Development

@@ -1,4 +1,14 @@
 {
+  "entity": {
+    "sensor": {
+      "dynamic_range": {
+        "default": "mdi:hdr",
+        "state": {
+          "sdr": "mdi:hdr-off"
+        }
+      }
+    }
+  },
   "services": {
     "add_to_playlist": {
       "service": "mdi:playlist-plus"

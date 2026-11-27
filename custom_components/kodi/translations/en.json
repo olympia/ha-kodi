@@ -80,6 +80,18 @@
                     }
                 }
             }
+        },
+        "sensor": {
+            "dynamic_range": {
+                "name": "Dynamic range",
+                "state": {
+                    "dolbyvision": "Dolby Vision",
+                    "hdr10": "HDR10",
+                    "hdr10plus": "HDR10+",
+                    "hlg": "HLG",
+                    "sdr": "SDR"
+                }
+            }
         }
     },
     "exceptions": {
@@ -145,6 +157,12 @@
         },
         "song_not_found": {
             "message": "No song matching {media_name} was found in the Kodi music library."
+        }
+    },
+    "issues": {
+        "deprecated_dynamic_range_attribute": {
+            "description": "The `dynamic_range` attribute of the Kodi media players is deprecated and will be removed. Use the **Dynamic range** sensor of the Kodi device instead.\n\nUpdate the automations, scripts and templates that use the attribute, then ignore this issue.",
+            "title": "The Kodi dynamic range attribute is deprecated"
         }
     },
     "services": {
