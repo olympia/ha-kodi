@@ -80,6 +80,41 @@ async def test_send_message_with_login_outside_latin1(
     assert authorizations == ["Basic a29kaTrFkXN6aWJhcmFjaw=="]
 
 
+@pytest.mark.usefixtures("socket_enabled")
+async def test_send_message_to_a_page_that_is_not_json(
+    hass: HomeAssistant,
+    aiohttp_raw_server: AiohttpRawServer,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test a login page answering for Kodi gives a translated error."""
+    caplog.set_level(logging.DEBUG)
+
+    async def handle(request: web.BaseRequest) -> web.Response:
+        return web.Response(text="<html>Login</html>", content_type="text/html")
+
+    server = await aiohttp_raw_server(handle)
+    config = {
+        NOTIFY_DOMAIN: NOTIFY_CONFIG[NOTIFY_DOMAIN]
+        | {
+            "host": "127.0.0.1",
+            "port": server.port,
+            "username": "kodi",
+            "password": "secret",
+        }
+    }
+    assert await async_setup_component(hass, NOTIFY_DOMAIN, config)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            NOTIFY_DOMAIN, "kodi", {"message": "Hello"}, blocking=True
+        )
+
+    assert err.value.translation_key == "notify_failed"
+    assert err.value.__cause__ is None
+    assert "a29kaTpzZWNyZXQ=" not in caplog.text
+
+
 @pytest.mark.parametrize(
     ("displaytime", "sent"),
     [(1500, 1500), ("5000", 5000), (2500.9, 2500)],
